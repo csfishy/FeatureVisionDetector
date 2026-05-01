@@ -1,0 +1,38 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "C#: FeatureVision.RuntimeApp",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/src/FeatureVision.RuntimeApp/bin/Debug/net8.0-windows/FeatureVision.RuntimeApp.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/src/FeatureVision.RuntimeApp",
+      "stopAtEntry": false,
+      "console": "internalConsole"
+    },
+    {
+      "name": "C#: FeatureVision.AnnotationTool",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/src/FeatureVision.AnnotationTool/bin/Debug/net8.0-windows/FeatureVision.AnnotationTool.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/src/FeatureVision.AnnotationTool",
+      "stopAtEntry": false,
+      "console": "internalConsole"
+    },
+    {
+      "name": "C#: FeatureVisionDetector.WinForms",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/src/FeatureVision.RuntimeApp/bin/Debug/net8.0-windows/FeatureVision.RuntimeApp.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/src/FeatureVision.RuntimeApp",
+      "stopAtEntry": false,
+      "console": "internalConsole"
+    }
+  ]
+}
