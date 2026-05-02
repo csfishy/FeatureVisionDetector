@@ -507,7 +507,7 @@ public partial class MainForm : Form
         {
             var box = result.BoundingBox;
             var rectangle = new Rectangle(box.X, box.Y, box.Width, box.Height);
-            DrawReferenceFeatureMask(graphics, referenceFeatureMask, rectangle);
+            DrawReferenceFeatureMask(graphics, referenceFeatureMask, result, rectangle);
             graphics.DrawRectangle(boxPen, rectangle);
 
             var centerX = (float)result.Center.X;
@@ -537,6 +537,7 @@ public partial class MainForm : Form
     private static void DrawReferenceFeatureMask(
         Graphics graphics,
         Mat? referenceFeatureMask,
+        DetectionResult result,
         Rectangle matchRectangle)
     {
         if (referenceFeatureMask is null ||
@@ -547,32 +548,64 @@ public partial class MainForm : Form
             return;
         }
 
-        using var featureBitmap = CreateTintedFeatureMaskBitmap(
+        using var featureOverlay = CreateTintedFeatureMaskOverlay(
             referenceFeatureMask,
             Color.FromArgb(105, Color.DeepSkyBlue));
-        if (featureBitmap is null)
+        if (featureOverlay is null)
         {
             return;
         }
 
-        var scale = matchRectangle.Height / (float)Math.Max(1, featureBitmap.Height);
-        var scaledWidth = featureBitmap.Width * scale;
-        var destination = new RectangleF(
-            matchRectangle.Left + (matchRectangle.Width - scaledWidth) / 2.0f,
-            matchRectangle.Top,
-            scaledWidth,
-            matchRectangle.Height);
+        var scale = result.Scale > 0.0
+            ? (float)result.Scale
+            : matchRectangle.Height / (float)Math.Max(1, featureOverlay.Bitmap.Height);
+        scale = Math.Max(0.01f, scale);
+
+        var axisReversed = result.ShapeTransform.Contains("axis-reversed", StringComparison.OrdinalIgnoreCase);
+        var mirrored = result.ShapeTransform.Contains("mirrored", StringComparison.OrdinalIgnoreCase);
+        var scaleX = axisReversed ? -scale : scale;
+        var scaleY = mirrored ? -scale : scale;
+        var destinationPoints = new[]
+        {
+            TransformFeaturePoint(0, 0, featureOverlay, result, scaleX, scaleY),
+            TransformFeaturePoint(featureOverlay.Bitmap.Width, 0, featureOverlay, result, scaleX, scaleY),
+            TransformFeaturePoint(0, featureOverlay.Bitmap.Height, featureOverlay, result, scaleX, scaleY)
+        };
 
         var previousInterpolation = graphics.InterpolationMode;
         var previousPixelOffset = graphics.PixelOffsetMode;
         graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
         graphics.PixelOffsetMode = PixelOffsetMode.Half;
-        graphics.DrawImage(featureBitmap, destination);
+        graphics.DrawImage(featureOverlay.Bitmap, destinationPoints);
         graphics.InterpolationMode = previousInterpolation;
         graphics.PixelOffsetMode = previousPixelOffset;
     }
 
-    private static Bitmap? CreateTintedFeatureMaskBitmap(Mat featureMask, Color color)
+    private static PointF TransformFeaturePoint(
+        float x,
+        float y,
+        ReferenceFeatureOverlay featureOverlay,
+        DetectionResult result,
+        float scaleX,
+        float scaleY)
+    {
+        var dx = x - featureOverlay.Center.X;
+        var dy = y - featureOverlay.Center.Y;
+        var referenceRadians = -featureOverlay.AngleDegrees * Math.PI / 180.0;
+        var referenceCos = Math.Cos(referenceRadians);
+        var referenceSin = Math.Sin(referenceRadians);
+        var normalizedX = (float)(dx * referenceCos - dy * referenceSin) * scaleX;
+        var normalizedY = (float)(dx * referenceSin + dy * referenceCos) * scaleY;
+
+        var targetRadians = result.RotationAngleDegrees * Math.PI / 180.0;
+        var targetCos = Math.Cos(targetRadians);
+        var targetSin = Math.Sin(targetRadians);
+        return new PointF(
+            (float)(result.Center.X + normalizedX * targetCos - normalizedY * targetSin),
+            (float)(result.Center.Y + normalizedX * targetSin + normalizedY * targetCos));
+    }
+
+    private static ReferenceFeatureOverlay? CreateTintedFeatureMaskOverlay(Mat featureMask, Color color)
     {
         using var binaryMask = CreateBinaryMask(featureMask);
         var foregroundRect = FindForegroundRect(binaryMask);
@@ -582,6 +615,12 @@ public partial class MainForm : Form
         }
 
         using var croppedMask = new Mat(binaryMask, foregroundRect);
+        var geometry = AnalyzeOverlayMaskGeometry(croppedMask);
+        if (!geometry.IsValid)
+        {
+            return null;
+        }
+
         var bitmap = new Bitmap(croppedMask.Width, croppedMask.Height, PixelFormat.Format32bppArgb);
         var bounds = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
         var bitmapData = bitmap.LockBits(bounds, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
@@ -614,7 +653,61 @@ public partial class MainForm : Form
             bitmap.UnlockBits(bitmapData);
         }
 
-        return bitmap;
+        return new ReferenceFeatureOverlay(
+            bitmap,
+            new PointF((float)geometry.CenterX, (float)geometry.CenterY),
+            geometry.AngleDegrees);
+    }
+
+    private static OverlayMaskGeometry AnalyzeOverlayMaskGeometry(Mat binaryMask)
+    {
+        var count = 0;
+        var sumX = 0.0;
+        var sumY = 0.0;
+        for (var y = 0; y < binaryMask.Rows; y++)
+        {
+            for (var x = 0; x < binaryMask.Cols; x++)
+            {
+                if (binaryMask.At<byte>(y, x) == 0)
+                {
+                    continue;
+                }
+
+                count++;
+                sumX += x;
+                sumY += y;
+            }
+        }
+
+        if (count == 0)
+        {
+            return OverlayMaskGeometry.Invalid;
+        }
+
+        var centerX = sumX / count;
+        var centerY = sumY / count;
+        var covarianceXx = 0.0;
+        var covarianceXy = 0.0;
+        var covarianceYy = 0.0;
+        for (var y = 0; y < binaryMask.Rows; y++)
+        {
+            for (var x = 0; x < binaryMask.Cols; x++)
+            {
+                if (binaryMask.At<byte>(y, x) == 0)
+                {
+                    continue;
+                }
+
+                var dx = x - centerX;
+                var dy = y - centerY;
+                covarianceXx += dx * dx;
+                covarianceXy += dx * dy;
+                covarianceYy += dy * dy;
+            }
+        }
+
+        var angleDegrees = Math.Atan2(2.0 * covarianceXy, covarianceXx - covarianceYy) * 0.5 * 180.0 / Math.PI;
+        return new OverlayMaskGeometry(centerX, centerY, NormalizeAngle(angleDegrees), IsValid: true);
     }
 
     private static Mat CreateBinaryMask(Mat mask)
@@ -669,6 +762,51 @@ public partial class MainForm : Form
         var right = Math.Max(first.Right, second.Right);
         var bottom = Math.Max(first.Bottom, second.Bottom);
         return OpenCvSharp.Rect.FromLTRB(left, top, right, bottom);
+    }
+
+    private static double NormalizeAngle(double angleDegrees)
+    {
+        while (angleDegrees <= -180.0)
+        {
+            angleDegrees += 360.0;
+        }
+
+        while (angleDegrees > 180.0)
+        {
+            angleDegrees -= 360.0;
+        }
+
+        return angleDegrees;
+    }
+
+    private sealed class ReferenceFeatureOverlay : IDisposable
+    {
+        public ReferenceFeatureOverlay(Bitmap bitmap, PointF center, double angleDegrees)
+        {
+            Bitmap = bitmap;
+            Center = center;
+            AngleDegrees = angleDegrees;
+        }
+
+        public Bitmap Bitmap { get; }
+
+        public PointF Center { get; }
+
+        public double AngleDegrees { get; }
+
+        public void Dispose()
+        {
+            Bitmap.Dispose();
+        }
+    }
+
+    private readonly record struct OverlayMaskGeometry(
+        double CenterX,
+        double CenterY,
+        double AngleDegrees,
+        bool IsValid)
+    {
+        public static OverlayMaskGeometry Invalid { get; } = new(0, 0, 0, IsValid: false);
     }
 
     private static Bitmap CreateComponentOverlayBitmap(
