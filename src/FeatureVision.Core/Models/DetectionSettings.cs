@@ -193,6 +193,16 @@ public sealed class DetectionSettings
     public double ComponentShapeDistanceSensitivity { get; set; } = 16.0;
 
     /// <summary>
+    /// Align shape profiles by their principal axis before comparing, allowing rotated targets to match.
+    /// </summary>
+    public bool ComponentShapeNormalizeRotation { get; set; } = true;
+
+    /// <summary>
+    /// Compare mirrored shape-profile variants in addition to the original profile.
+    /// </summary>
+    public bool ComponentShapeAllowFlip { get; set; } = true;
+
+    /// <summary>
     /// Optional detection region in live-frame coordinates.
     /// </summary>
     public RoiRect? RegionOfInterest { get; set; }

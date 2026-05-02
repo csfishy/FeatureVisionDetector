@@ -7,32 +7,154 @@ public sealed class ComponentShapeScorer
 {
     public double Score(Mat referenceMask, Mat candidateMask, DetectionSettings settings)
     {
+        return ScoreDetailed(referenceMask, candidateMask, settings).Score;
+    }
+
+    public ComponentShapeScoreResult ScoreDetailed(Mat referenceMask, Mat candidateMask, DetectionSettings settings)
+    {
         ArgumentNullException.ThrowIfNull(referenceMask);
         ArgumentNullException.ThrowIfNull(candidateMask);
         ArgumentNullException.ThrowIfNull(settings);
 
         if (referenceMask.Empty() || candidateMask.Empty())
         {
-            return 0.0;
+            return new ComponentShapeScoreResult(0.0, string.Empty);
+        }
+
+        var referenceProfile = CreateProfile(referenceMask, settings);
+        var candidateProfile = CreateProfile(candidateMask, settings);
+        return ScoreDetailed(referenceProfile, candidateProfile, settings);
+    }
+
+    public ComponentShapeProfile CreateProfile(Mat mask, DetectionSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(mask);
+        ArgumentNullException.ThrowIfNull(settings);
+
+        if (mask.Empty())
+        {
+            return ComponentShapeProfile.Empty;
         }
 
         var sampleCount = Math.Clamp(settings.ComponentShapeProfileSamples, 16, 256);
-        var referenceProfile = CreateProfile(referenceMask, sampleCount);
-        var candidateProfile = CreateProfile(candidateMask, sampleCount);
-        if (referenceProfile.Length == 0 || candidateProfile.Length == 0)
-        {
-            return 0.0;
-        }
-
-        var distance = Math.Min(
-            MeanAbsoluteDistance(referenceProfile, candidateProfile),
-            MeanAbsoluteDistance(referenceProfile, ReverseProfile(candidateProfile)));
-
-        var sensitivity = Math.Max(0.1, settings.ComponentShapeDistanceSensitivity);
-        return Math.Clamp(Math.Exp(-distance * sensitivity), 0.0, 1.0);
+        var values = CreateProfileValues(
+            mask,
+            sampleCount,
+            settings.ComponentShapeNormalizeRotation);
+        return values.Length == 0
+            ? ComponentShapeProfile.Empty
+            : new ComponentShapeProfile(values);
     }
 
-    private static double[] CreateProfile(Mat mask, int sampleCount)
+    public ComponentShapeScoreResult ScoreDetailed(
+        ComponentShapeProfile referenceProfile,
+        ComponentShapeProfile candidateProfile,
+        DetectionSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        if (!referenceProfile.IsValid || !candidateProfile.IsValid)
+        {
+            return new ComponentShapeScoreResult(0.0, string.Empty);
+        }
+
+        var bestDistance = double.MaxValue;
+        var bestTransform = "normal";
+        CompareCandidateProfile(referenceProfile.Values, candidateProfile.Values, "normal", ref bestDistance, ref bestTransform);
+        CompareCandidateProfile(referenceProfile.Values, ReverseProfile(candidateProfile.Values), "axis-reversed", ref bestDistance, ref bestTransform);
+        if (settings.ComponentShapeAllowFlip)
+        {
+            var mirroredProfile = NegateProfile(candidateProfile.Values);
+            CompareCandidateProfile(referenceProfile.Values, mirroredProfile, "mirrored", ref bestDistance, ref bestTransform);
+            CompareCandidateProfile(
+                referenceProfile.Values,
+                ReverseProfile(mirroredProfile),
+                "mirrored-axis-reversed",
+                ref bestDistance,
+                ref bestTransform);
+        }
+
+        var sensitivity = Math.Max(0.1, settings.ComponentShapeDistanceSensitivity);
+        var score = Math.Clamp(Math.Exp(-bestDistance * sensitivity), 0.0, 1.0);
+        return new ComponentShapeScoreResult(score, bestTransform);
+    }
+
+    private static double[] CreateProfileValues(Mat mask, int sampleCount, bool normalizeRotation)
+    {
+        return normalizeRotation
+            ? CreatePrincipalAxisProfile(mask, sampleCount)
+            : CreateVerticalProfile(mask, sampleCount);
+    }
+
+    private static double[] CreatePrincipalAxisProfile(Mat mask, int sampleCount)
+    {
+        using var binary = CreateBinaryMask(mask);
+        var points = CollectForegroundPoints(binary);
+        if (points.Count < 2)
+        {
+            return Array.Empty<double>();
+        }
+
+        var axes = CalculatePrincipalAxes(points);
+        if (!axes.IsValid)
+        {
+            return Array.Empty<double>();
+        }
+
+        var minT = double.MaxValue;
+        var maxT = double.MinValue;
+        foreach (var point in points)
+        {
+            var dx = point.X - axes.CenterX;
+            var dy = point.Y - axes.CenterY;
+            var t = dx * axes.AxisX + dy * axes.AxisY;
+            minT = Math.Min(minT, t);
+            maxT = Math.Max(maxT, t);
+        }
+
+        var majorLength = maxT - minT;
+        if (majorLength <= 1.0)
+        {
+            return Array.Empty<double>();
+        }
+
+        var profile = new double[sampleCount];
+        var counts = new int[sampleCount];
+        Array.Fill(profile, double.NaN);
+
+        foreach (var point in points)
+        {
+            var dx = point.X - axes.CenterX;
+            var dy = point.Y - axes.CenterY;
+            var t = dx * axes.AxisX + dy * axes.AxisY;
+            var lateral = dx * axes.LateralX + dy * axes.LateralY;
+            var sampleIndex = (int)Math.Round((t - minT) / majorLength * (sampleCount - 1));
+            sampleIndex = Math.Clamp(sampleIndex, 0, sampleCount - 1);
+
+            if (counts[sampleIndex] == 0)
+            {
+                profile[sampleIndex] = 0.0;
+            }
+
+            profile[sampleIndex] += lateral / majorLength;
+            counts[sampleIndex]++;
+        }
+
+        for (var index = 0; index < profile.Length; index++)
+        {
+            if (counts[index] > 0)
+            {
+                profile[index] /= counts[index];
+            }
+        }
+
+        FillMissingProfileValues(profile);
+        RemoveLinearTrend(profile);
+        SmoothProfile(profile);
+        return profile;
+    }
+
+    private static double[] CreateVerticalProfile(Mat mask, int sampleCount)
     {
         using var binary = CreateBinaryMask(mask);
         var rect = FindForegroundRect(binary);
@@ -81,6 +203,68 @@ public sealed class ComponentShapeScorer
         RemoveLinearTrend(profile);
         SmoothProfile(profile);
         return profile;
+    }
+
+    private static List<Point> CollectForegroundPoints(Mat binary)
+    {
+        var points = new List<Point>();
+        for (var y = 0; y < binary.Rows; y++)
+        {
+            for (var x = 0; x < binary.Cols; x++)
+            {
+                if (binary.At<byte>(y, x) != 0)
+                {
+                    points.Add(new Point(x, y));
+                }
+            }
+        }
+
+        return points;
+    }
+
+    private static PrincipalAxes CalculatePrincipalAxes(IReadOnlyList<Point> points)
+    {
+        var meanX = 0.0;
+        var meanY = 0.0;
+        foreach (var point in points)
+        {
+            meanX += point.X;
+            meanY += point.Y;
+        }
+
+        meanX /= points.Count;
+        meanY /= points.Count;
+
+        var covarianceXx = 0.0;
+        var covarianceXy = 0.0;
+        var covarianceYy = 0.0;
+        foreach (var point in points)
+        {
+            var dx = point.X - meanX;
+            var dy = point.Y - meanY;
+            covarianceXx += dx * dx;
+            covarianceXy += dx * dy;
+            covarianceYy += dy * dy;
+        }
+
+        if (Math.Abs(covarianceXx) < double.Epsilon &&
+            Math.Abs(covarianceXy) < double.Epsilon &&
+            Math.Abs(covarianceYy) < double.Epsilon)
+        {
+            return PrincipalAxes.Invalid;
+        }
+
+        var angle = Math.Atan2(2.0 * covarianceXy, covarianceXx - covarianceYy) * 0.5;
+        var axisX = Math.Cos(angle);
+        var axisY = Math.Sin(angle);
+        return new PrincipalAxes(
+            meanX,
+            meanY,
+            axisX,
+            axisY,
+            -axisY,
+            axisX,
+            IsValid: true);
     }
 
     private static Mat CreateBinaryMask(Mat mask)
@@ -236,10 +420,59 @@ public sealed class ComponentShapeScorer
         return sum / count;
     }
 
+    private static void CompareCandidateProfile(
+        IReadOnlyList<double> referenceProfile,
+        IReadOnlyList<double> candidateProfile,
+        string transform,
+        ref double bestDistance,
+        ref string bestTransform)
+    {
+        var distance = MeanAbsoluteDistance(referenceProfile, candidateProfile);
+        if (distance >= bestDistance)
+        {
+            return;
+        }
+
+        bestDistance = distance;
+        bestTransform = transform;
+    }
+
     private static double[] ReverseProfile(IReadOnlyList<double> profile)
     {
         var reversed = profile.ToArray();
         Array.Reverse(reversed);
         return reversed;
     }
+
+    private static double[] NegateProfile(IReadOnlyList<double> profile)
+    {
+        var negated = new double[profile.Count];
+        for (var index = 0; index < profile.Count; index++)
+        {
+            negated[index] = -profile[index];
+        }
+
+        return negated;
+    }
+
+    private readonly record struct PrincipalAxes(
+        double CenterX,
+        double CenterY,
+        double AxisX,
+        double AxisY,
+        double LateralX,
+        double LateralY,
+        bool IsValid)
+    {
+        public static PrincipalAxes Invalid { get; } = new(0, 0, 0, 0, 0, 0, IsValid: false);
+    }
+}
+
+public readonly record struct ComponentShapeScoreResult(double Score, string Transform);
+
+public readonly record struct ComponentShapeProfile(double[] Values)
+{
+    public static ComponentShapeProfile Empty { get; } = new(Array.Empty<double>());
+
+    public bool IsValid => Values.Length > 0;
 }

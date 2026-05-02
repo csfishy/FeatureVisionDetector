@@ -41,9 +41,19 @@ public sealed class ConnectedComponentResult
     public double ShapeScore { get; set; }
 
     /// <summary>
+    /// Shape comparison variant that produced the best score.
+    /// </summary>
+    public string ShapeTransform { get; set; } = string.Empty;
+
+    /// <summary>
     /// Average normalized BlackHat response inside the component, from 0 to 1.
     /// </summary>
     public double ResponseScore { get; set; }
+
+    /// <summary>
+    /// Component height divided by the closest reference feature height.
+    /// </summary>
+    public double Scale { get; set; } = 1.0;
 
     /// <summary>
     /// Height divided by width for the component bounding box.

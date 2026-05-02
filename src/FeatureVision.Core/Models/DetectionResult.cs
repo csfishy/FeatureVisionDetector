@@ -26,6 +26,16 @@ public sealed class DetectionResult
     public double MatchingScore { get; set; }
 
     /// <summary>
+    /// Size ratio relative to the reference feature.
+    /// </summary>
+    public double Scale { get; set; } = 1.0;
+
+    /// <summary>
+    /// Shape comparison variant that produced the accepted match.
+    /// </summary>
+    public string ShapeTransform { get; set; } = string.Empty;
+
+    /// <summary>
     /// Axis-aligned bounding box around the detected feature in live-frame coordinates.
     /// </summary>
     public RoiRect BoundingBox { get; set; } = new();

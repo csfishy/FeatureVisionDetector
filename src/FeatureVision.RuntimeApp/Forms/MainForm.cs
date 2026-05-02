@@ -5,7 +5,10 @@ using FeatureVision.Core.Matching;
 using FeatureVision.Core.Models;
 using OpenCvSharp;
 using System.Diagnostics;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.IO.Compression;
+using System.Runtime.InteropServices;
 
 namespace FeatureVision.RuntimeApp.Forms;
 
@@ -26,6 +29,7 @@ public partial class MainForm : Form
     private Task? cameraPreviewTask;
     private DateTime lastCameraFrameDisplayedUtc = DateTime.MinValue;
     private volatile bool isDetectionEnabled;
+    private volatile bool isFeatureOverlayEnabled;
     private int pendingPreviewUpdates;
     private IReadOnlyList<DetectionResult> lastStaticResults = Array.Empty<DetectionResult>();
     private IReadOnlyList<ConnectedComponentResult> lastComponents = Array.Empty<ConnectedComponentResult>();
@@ -112,6 +116,8 @@ public partial class MainForm : Form
         resultsGridView.Columns.Add("CenterY", "CenterY");
         resultsGridView.Columns.Add("Angle", "Angle");
         resultsGridView.Columns.Add("Score", "Score");
+        resultsGridView.Columns.Add("Scale", "Scale");
+        resultsGridView.Columns.Add("Transform", "Mode");
         resultsGridView.Columns.Add("BoundingBox", "BoundingBox");
         resultsGridView.MultiSelect = false;
         resultsGridView.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
@@ -126,9 +132,11 @@ public partial class MainForm : Form
         componentsGridView.Columns.Add("Angle", "Angle");
         componentsGridView.Columns.Add("Score", "Score");
         componentsGridView.Columns.Add("Shape", "Shape");
+        componentsGridView.Columns.Add("Transform", "Mode");
         componentsGridView.Columns.Add("Response", "Resp");
+        componentsGridView.Columns.Add("Scale", "Scale");
         componentsGridView.Columns.Add("Area", "Area");
-        componentsGridView.Columns.Add("Aspect", "H/W");
+        componentsGridView.Columns.Add("Aspect", "Aspect");
         componentsGridView.Columns.Add("BoundingBox", "BoundingBox");
         componentsGridView.MultiSelect = false;
         componentsGridView.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
@@ -220,6 +228,12 @@ public partial class MainForm : Form
 
     private void PreviewStageComboBox_SelectedIndexChanged(object? sender, EventArgs e)
     {
+        RefreshStaticPreview();
+    }
+
+    private void ShowFeatureOverlayCheckBox_CheckedChanged(object? sender, EventArgs e)
+    {
+        isFeatureOverlayEnabled = showFeatureOverlayCheckBox.Checked;
         RefreshStaticPreview();
     }
 
@@ -317,15 +331,19 @@ public partial class MainForm : Form
 
         ApplySettingsUiToSettings(CurrentSettings);
         List<ConnectedComponentResult> components;
+        List<ConnectedComponentResult> matchedComponents;
         lock (referenceShapeLock)
         {
             components = blackHatComponentDetector
-                .Detect(frame, CurrentSettings, referenceShapeMasks)
+                .Detect(frame, CurrentSettings, referenceShapeMasks, applyScaleFilter: false)
                 .OrderByDescending(component => component.Score)
+                .ToList();
+            matchedComponents = components
+                .Where(component => IsAcceptedMatchCandidate(component, CurrentSettings))
                 .Take(CurrentSettings.MaximumDetections)
                 .ToList();
         }
-        var results = components
+        var results = matchedComponents
             .Select(ConvertComponentToDetectionResult)
             .ToList();
 
@@ -335,7 +353,7 @@ public partial class MainForm : Form
         PopulateResults(results);
         resultsTabControl.SelectedTab = matchesTabPage;
         RefreshStaticPreview();
-        resultStatusLabel.Text = $"Results: {results.Count} components";
+        resultStatusLabel.Text = $"Results: {results.Count} / Components: {components.Count}";
     }
 
     private void RunBlackHatComponents(bool selectComponentsTab = true)
@@ -356,7 +374,7 @@ public partial class MainForm : Form
         lock (referenceShapeLock)
         {
             components = blackHatComponentDetector
-                .Detect(frame, CurrentSettings, referenceShapeMasks)
+                .Detect(frame, CurrentSettings, referenceShapeMasks, applyScaleFilter: false)
                 .OrderByDescending(component => component.Score)
                 .ToList();
         }
@@ -382,6 +400,8 @@ public partial class MainForm : Form
                 result.Center.Y.ToString("0.0"),
                 result.RotationAngleDegrees.ToString("0.0"),
                 result.MatchingScore.ToString("0.000"),
+                result.Scale.ToString("0.00"),
+                result.ShapeTransform,
                 $"{result.BoundingBox.X}, {result.BoundingBox.Y}, {result.BoundingBox.Width}, {result.BoundingBox.Height}");
             resultsGridView.Rows[rowIndex].Tag = result;
         }
@@ -406,7 +426,9 @@ public partial class MainForm : Form
                 component.RotationAngleDegrees.ToString("0.0"),
                 component.Score.ToString("0.000"),
                 component.ShapeScore.ToString("0.000"),
+                component.ShapeTransform,
                 component.ResponseScore.ToString("0.000"),
+                component.Scale.ToString("0.00"),
                 component.AreaPixels.ToString("0.0"),
                 component.AspectRatio.ToString("0.00"),
                 $"{box.X}, {box.Y}, {box.Width}, {box.Height}");
@@ -432,6 +454,8 @@ public partial class MainForm : Form
             },
             RotationAngleDegrees = component.RotationAngleDegrees,
             MatchingScore = component.Score,
+            Scale = component.Scale,
+            ShapeTransform = component.ShapeTransform,
             BoundingBox = new RoiRect
             {
                 X = component.BoundingBox.X,
@@ -442,6 +466,15 @@ public partial class MainForm : Form
         };
     }
 
+    private static bool IsAcceptedMatchCandidate(
+        ConnectedComponentResult component,
+        DetectionSettings settings)
+    {
+        return component.Score >= settings.ScoreThreshold &&
+            component.Scale >= settings.ScaleMin &&
+            component.Scale <= settings.ScaleMax;
+    }
+
     private void DrawOverlay(IReadOnlyList<DetectionResult> results)
     {
         if (testImageBitmap is null)
@@ -449,11 +482,17 @@ public partial class MainForm : Form
             return;
         }
 
-        var overlay = CreateOverlayBitmap(testImageBitmap, GetSelectedResults());
+        using var referenceFeatureMask = isFeatureOverlayEnabled
+            ? CreateReferenceFeatureMaskSnapshot()
+            : null;
+        var overlay = CreateOverlayBitmap(testImageBitmap, GetSelectedResults(), referenceFeatureMask);
         SetPreviewImage(overlay);
     }
 
-    private static Bitmap CreateOverlayBitmap(Bitmap source, IReadOnlyList<DetectionResult> results)
+    private static Bitmap CreateOverlayBitmap(
+        Bitmap source,
+        IReadOnlyList<DetectionResult> results,
+        Mat? referenceFeatureMask = null)
     {
         var overlay = new Bitmap(source);
         using var graphics = Graphics.FromImage(overlay);
@@ -468,6 +507,7 @@ public partial class MainForm : Form
         {
             var box = result.BoundingBox;
             var rectangle = new Rectangle(box.X, box.Y, box.Width, box.Height);
+            DrawReferenceFeatureMask(graphics, referenceFeatureMask, rectangle);
             graphics.DrawRectangle(boxPen, rectangle);
 
             var centerX = (float)result.Center.X;
@@ -484,7 +524,7 @@ public partial class MainForm : Form
                 centerX + (float)(Math.Cos(angleRadians) * angleLength),
                 centerY + (float)(Math.Sin(angleRadians) * angleLength));
 
-            var label = $"{result.MatchingScore:0.000}  {result.RotationAngleDegrees:0.0} deg";
+            var label = $"{result.MatchingScore:0.000}  S:{result.Scale:0.00}  {result.RotationAngleDegrees:0.0} deg";
             var labelSize = graphics.MeasureString(label, labelFont);
             var labelBounds = new RectangleF(rectangle.Left, Math.Max(0, rectangle.Top - labelSize.Height), labelSize.Width, labelSize.Height);
             graphics.FillRectangle(labelBackgroundBrush, labelBounds);
@@ -492,6 +532,143 @@ public partial class MainForm : Form
         }
 
         return overlay;
+    }
+
+    private static void DrawReferenceFeatureMask(
+        Graphics graphics,
+        Mat? referenceFeatureMask,
+        Rectangle matchRectangle)
+    {
+        if (referenceFeatureMask is null ||
+            referenceFeatureMask.Empty() ||
+            matchRectangle.Width <= 0 ||
+            matchRectangle.Height <= 0)
+        {
+            return;
+        }
+
+        using var featureBitmap = CreateTintedFeatureMaskBitmap(
+            referenceFeatureMask,
+            Color.FromArgb(105, Color.DeepSkyBlue));
+        if (featureBitmap is null)
+        {
+            return;
+        }
+
+        var scale = matchRectangle.Height / (float)Math.Max(1, featureBitmap.Height);
+        var scaledWidth = featureBitmap.Width * scale;
+        var destination = new RectangleF(
+            matchRectangle.Left + (matchRectangle.Width - scaledWidth) / 2.0f,
+            matchRectangle.Top,
+            scaledWidth,
+            matchRectangle.Height);
+
+        var previousInterpolation = graphics.InterpolationMode;
+        var previousPixelOffset = graphics.PixelOffsetMode;
+        graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
+        graphics.PixelOffsetMode = PixelOffsetMode.Half;
+        graphics.DrawImage(featureBitmap, destination);
+        graphics.InterpolationMode = previousInterpolation;
+        graphics.PixelOffsetMode = previousPixelOffset;
+    }
+
+    private static Bitmap? CreateTintedFeatureMaskBitmap(Mat featureMask, Color color)
+    {
+        using var binaryMask = CreateBinaryMask(featureMask);
+        var foregroundRect = FindForegroundRect(binaryMask);
+        if (foregroundRect.Width <= 0 || foregroundRect.Height <= 0)
+        {
+            return null;
+        }
+
+        using var croppedMask = new Mat(binaryMask, foregroundRect);
+        var bitmap = new Bitmap(croppedMask.Width, croppedMask.Height, PixelFormat.Format32bppArgb);
+        var bounds = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+        var bitmapData = bitmap.LockBits(bounds, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+
+        try
+        {
+            var stride = Math.Abs(bitmapData.Stride);
+            var pixels = new byte[stride * bitmap.Height];
+            for (var y = 0; y < croppedMask.Rows; y++)
+            {
+                for (var x = 0; x < croppedMask.Cols; x++)
+                {
+                    if (croppedMask.At<byte>(y, x) == 0)
+                    {
+                        continue;
+                    }
+
+                    var offset = y * stride + x * 4;
+                    pixels[offset] = color.B;
+                    pixels[offset + 1] = color.G;
+                    pixels[offset + 2] = color.R;
+                    pixels[offset + 3] = color.A;
+                }
+            }
+
+            Marshal.Copy(pixels, 0, bitmapData.Scan0, pixels.Length);
+        }
+        finally
+        {
+            bitmap.UnlockBits(bitmapData);
+        }
+
+        return bitmap;
+    }
+
+    private static Mat CreateBinaryMask(Mat mask)
+    {
+        Mat grayscale;
+        if (mask.Channels() == 1)
+        {
+            grayscale = mask.Clone();
+        }
+        else
+        {
+            grayscale = new Mat();
+            var conversion = mask.Channels() == 4
+                ? ColorConversionCodes.BGRA2GRAY
+                : ColorConversionCodes.BGR2GRAY;
+            Cv2.CvtColor(mask, grayscale, conversion);
+        }
+
+        var binary = new Mat();
+        Cv2.Threshold(grayscale, binary, 0, 255, ThresholdTypes.Binary);
+        grayscale.Dispose();
+        return binary;
+    }
+
+    private static OpenCvSharp.Rect FindForegroundRect(Mat binaryMask)
+    {
+        Cv2.FindContours(
+            binaryMask,
+            out OpenCvSharp.Point[][] contours,
+            out _,
+            RetrievalModes.External,
+            ContourApproximationModes.ApproxSimple);
+
+        if (contours.Length == 0)
+        {
+            return new OpenCvSharp.Rect();
+        }
+
+        var rect = Cv2.BoundingRect(contours[0]);
+        for (var index = 1; index < contours.Length; index++)
+        {
+            rect = Union(rect, Cv2.BoundingRect(contours[index]));
+        }
+
+        return rect;
+    }
+
+    private static OpenCvSharp.Rect Union(OpenCvSharp.Rect first, OpenCvSharp.Rect second)
+    {
+        var left = Math.Min(first.Left, second.Left);
+        var top = Math.Min(first.Top, second.Top);
+        var right = Math.Max(first.Right, second.Right);
+        var bottom = Math.Max(first.Bottom, second.Bottom);
+        return OpenCvSharp.Rect.FromLTRB(left, top, right, bottom);
     }
 
     private static Bitmap CreateComponentOverlayBitmap(
@@ -517,7 +694,7 @@ public partial class MainForm : Form
             graphics.DrawLine(centerPen, centerX - 6, centerY, centerX + 6, centerY);
             graphics.DrawLine(centerPen, centerX, centerY - 6, centerX, centerY + 6);
 
-            var label = $"#{component.Id} {component.Score:0.000} {component.RotationAngleDegrees:0.0} deg";
+            var label = $"#{component.Id} {component.Score:0.000} S:{component.Scale:0.00} {component.RotationAngleDegrees:0.0} deg";
             var labelSize = graphics.MeasureString(label, labelFont);
             var labelBounds = new RectangleF(
                 rectangle.Left,
@@ -605,10 +782,11 @@ public partial class MainForm : Form
             lock (referenceShapeLock)
             {
                 components = blackHatComponentDetector
-                    .Detect(frame, CurrentSettings, referenceShapeMasks)
+                    .Detect(frame, CurrentSettings, referenceShapeMasks, applyScaleFilter: false)
                     .OrderByDescending(component => component.Score)
                     .ToList();
                 results = components
+                    .Where(component => IsAcceptedMatchCandidate(component, CurrentSettings))
                     .Take(CurrentSettings.MaximumDetections)
                     .Select(ConvertComponentToDetectionResult)
                     .ToList();
@@ -616,12 +794,16 @@ public partial class MainForm : Form
             stopwatch.Stop();
 
             selectedResults = SelectDisplayResults(results);
+            using var referenceFeatureMask = isFeatureOverlayEnabled
+                ? CreateReferenceFeatureMaskSnapshot()
+                : null;
             bitmap = CreatePreviewBitmap(
                 frame,
                 selectedResults,
                 Array.Empty<ConnectedComponentResult>(),
                 allowOverlay: true,
-                showComponentOverlay: false);
+                showComponentOverlay: false,
+                referenceFeatureMask);
             processingText = $"Processing: {stopwatch.ElapsedMilliseconds} ms";
         }
         else
@@ -631,7 +813,8 @@ public partial class MainForm : Form
                 selectedResults,
                 Array.Empty<ConnectedComponentResult>(),
                 allowOverlay: false,
-                showComponentOverlay: false);
+                showComponentOverlay: false,
+                referenceFeatureMask: null);
         }
 
         var posted = false;
@@ -770,12 +953,14 @@ public partial class MainForm : Form
     private void ApplySettingsUiToSettings(DetectionSettings settings)
     {
         settings.ScoreThreshold = (double)scoreThresholdNumericUpDown.Value;
-        settings.AngleMin = (double)angleMinNumericUpDown.Value;
-        settings.AngleMax = (double)angleMaxNumericUpDown.Value;
-        settings.AngleStep = (double)angleStepNumericUpDown.Value;
+        settings.ScaleMin = (double)scaleMinNumericUpDown.Value;
+        settings.ScaleMax = (double)scaleMaxNumericUpDown.Value;
+        settings.ComponentShapeScoreWeight = (double)shapeWeightNumericUpDown.Value;
+        settings.ComponentShapeDistanceSensitivity = (double)shapeSensitivityNumericUpDown.Value;
+        settings.ComponentShapeNormalizeRotation = shapeRotationCheckBox.Checked;
+        settings.ComponentShapeAllowFlip = shapeFlipCheckBox.Checked;
         settings.BlurKernelSize = (int)blurKernelNumericUpDown.Value;
         settings.BlackHatKernelSize = (int)blackHatKernelNumericUpDown.Value;
-        settings.NmsOverlapThreshold = (double)nmsNumericUpDown.Value;
         settings.ComponentThreshold = (double)componentThresholdNumericUpDown.Value;
         settings.ComponentOpenKernelSize = (int)componentOpenNumericUpDown.Value;
         settings.ComponentCloseKernelSize = (int)componentCloseNumericUpDown.Value;
@@ -795,12 +980,14 @@ public partial class MainForm : Form
         try
         {
             scoreThresholdNumericUpDown.Value = ClampDecimal((decimal)settings.ScoreThreshold, scoreThresholdNumericUpDown.Minimum, scoreThresholdNumericUpDown.Maximum);
-            angleMinNumericUpDown.Value = ClampDecimal((decimal)settings.AngleMin, angleMinNumericUpDown.Minimum, angleMinNumericUpDown.Maximum);
-            angleMaxNumericUpDown.Value = ClampDecimal((decimal)settings.AngleMax, angleMaxNumericUpDown.Minimum, angleMaxNumericUpDown.Maximum);
-            angleStepNumericUpDown.Value = ClampDecimal((decimal)settings.AngleStep, angleStepNumericUpDown.Minimum, angleStepNumericUpDown.Maximum);
+            scaleMinNumericUpDown.Value = ClampDecimal((decimal)settings.ScaleMin, scaleMinNumericUpDown.Minimum, scaleMinNumericUpDown.Maximum);
+            scaleMaxNumericUpDown.Value = ClampDecimal((decimal)settings.ScaleMax, scaleMaxNumericUpDown.Minimum, scaleMaxNumericUpDown.Maximum);
+            shapeWeightNumericUpDown.Value = ClampDecimal((decimal)settings.ComponentShapeScoreWeight, shapeWeightNumericUpDown.Minimum, shapeWeightNumericUpDown.Maximum);
+            shapeSensitivityNumericUpDown.Value = ClampDecimal((decimal)settings.ComponentShapeDistanceSensitivity, shapeSensitivityNumericUpDown.Minimum, shapeSensitivityNumericUpDown.Maximum);
+            shapeRotationCheckBox.Checked = settings.ComponentShapeNormalizeRotation;
+            shapeFlipCheckBox.Checked = settings.ComponentShapeAllowFlip;
             blurKernelNumericUpDown.Value = ClampDecimal(settings.BlurKernelSize, blurKernelNumericUpDown.Minimum, blurKernelNumericUpDown.Maximum);
             blackHatKernelNumericUpDown.Value = ClampDecimal(settings.BlackHatKernelSize, blackHatKernelNumericUpDown.Minimum, blackHatKernelNumericUpDown.Maximum);
-            nmsNumericUpDown.Value = ClampDecimal((decimal)settings.NmsOverlapThreshold, nmsNumericUpDown.Minimum, nmsNumericUpDown.Maximum);
             componentThresholdNumericUpDown.Value = ClampDecimal((decimal)settings.ComponentThreshold, componentThresholdNumericUpDown.Minimum, componentThresholdNumericUpDown.Maximum);
             componentOpenNumericUpDown.Value = ClampDecimal(settings.ComponentOpenKernelSize, componentOpenNumericUpDown.Minimum, componentOpenNumericUpDown.Maximum);
             componentCloseNumericUpDown.Value = ClampDecimal(settings.ComponentCloseKernelSize, componentCloseNumericUpDown.Minimum, componentCloseNumericUpDown.Maximum);
@@ -828,12 +1015,16 @@ public partial class MainForm : Form
 
         ApplySettingsUiToSettings(CurrentSettings);
         using var frame = Cv2.ImRead(testImagePath, ImreadModes.Color);
+        using var referenceFeatureMask = isFeatureOverlayEnabled
+            ? CreateReferenceFeatureMaskSnapshot()
+            : null;
         var bitmap = CreatePreviewBitmap(
             frame,
             GetSelectedResults(),
             GetSelectedComponents(),
             allowOverlay: true,
-            showComponentOverlay: resultsTabControl.SelectedTab == componentsTabPage);
+            showComponentOverlay: resultsTabControl.SelectedTab == componentsTabPage,
+            referenceFeatureMask);
         SetPreviewImage(bitmap);
     }
 
@@ -842,7 +1033,8 @@ public partial class MainForm : Form
         IReadOnlyList<DetectionResult> selectedResults,
         IReadOnlyList<ConnectedComponentResult> selectedComponents,
         bool allowOverlay,
-        bool showComponentOverlay)
+        bool showComponentOverlay,
+        Mat? referenceFeatureMask)
     {
         ApplySettingsUiToSettings(CurrentSettings);
         var stage = CurrentPreviewStage;
@@ -852,7 +1044,7 @@ public partial class MainForm : Form
             using var rawBitmap = ConvertMatToBitmap(frame);
             return showComponentOverlay
                 ? CreateComponentOverlayBitmap(rawBitmap, selectedComponents)
-                : CreateOverlayBitmap(rawBitmap, selectedResults);
+                : CreateOverlayBitmap(rawBitmap, selectedResults, referenceFeatureMask);
         }
 
         if (stage == RuntimePreviewStage.Raw || stage == RuntimePreviewStage.Overlay)
@@ -1033,6 +1225,15 @@ public partial class MainForm : Form
 
                 referenceShapeMasks.Add(mask);
             }
+        }
+    }
+
+    private Mat? CreateReferenceFeatureMaskSnapshot()
+    {
+        lock (referenceShapeLock)
+        {
+            var referenceMask = referenceShapeMasks.FirstOrDefault(mask => !mask.Empty());
+            return referenceMask?.Clone();
         }
     }
 

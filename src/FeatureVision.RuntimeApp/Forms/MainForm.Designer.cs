@@ -47,27 +47,33 @@ partial class MainForm
     private ToolStripSeparator processingToolSeparator;
     private ToolStripLabel previewStageToolLabel;
     private ToolStripComboBox previewStageComboBox;
+    private ToolStripControlHost showFeatureOverlayHost;
+    private CheckBox showFeatureOverlayCheckBox;
     private ToolStripLabel scoreThresholdToolLabel;
     private ToolStripControlHost scoreThresholdHost;
     private NumericUpDown scoreThresholdNumericUpDown;
-    private ToolStripLabel angleMinToolLabel;
-    private ToolStripControlHost angleMinHost;
-    private NumericUpDown angleMinNumericUpDown;
-    private ToolStripLabel angleMaxToolLabel;
-    private ToolStripControlHost angleMaxHost;
-    private NumericUpDown angleMaxNumericUpDown;
-    private ToolStripLabel angleStepToolLabel;
-    private ToolStripControlHost angleStepHost;
-    private NumericUpDown angleStepNumericUpDown;
+    private ToolStripLabel scaleMinToolLabel;
+    private ToolStripControlHost scaleMinHost;
+    private NumericUpDown scaleMinNumericUpDown;
+    private ToolStripLabel scaleMaxToolLabel;
+    private ToolStripControlHost scaleMaxHost;
+    private NumericUpDown scaleMaxNumericUpDown;
+    private ToolStripLabel shapeWeightToolLabel;
+    private ToolStripControlHost shapeWeightHost;
+    private NumericUpDown shapeWeightNumericUpDown;
+    private ToolStripLabel shapeSensitivityToolLabel;
+    private ToolStripControlHost shapeSensitivityHost;
+    private NumericUpDown shapeSensitivityNumericUpDown;
+    private ToolStripControlHost shapeRotationHost;
+    private CheckBox shapeRotationCheckBox;
+    private ToolStripControlHost shapeFlipHost;
+    private CheckBox shapeFlipCheckBox;
     private ToolStripLabel blurKernelToolLabel;
     private ToolStripControlHost blurKernelHost;
     private NumericUpDown blurKernelNumericUpDown;
     private ToolStripLabel blackHatKernelToolLabel;
     private ToolStripControlHost blackHatKernelHost;
     private NumericUpDown blackHatKernelNumericUpDown;
-    private ToolStripLabel nmsToolLabel;
-    private ToolStripControlHost nmsHost;
-    private NumericUpDown nmsNumericUpDown;
     private SplitContainer mainSplitContainer;
     private PictureBox previewPictureBox;
     private TabControl resultsTabControl;
@@ -146,27 +152,33 @@ partial class MainForm
         processingToolSeparator = new ToolStripSeparator();
         previewStageToolLabel = new ToolStripLabel();
         previewStageComboBox = new ToolStripComboBox();
+        showFeatureOverlayCheckBox = new CheckBox();
+        showFeatureOverlayHost = new ToolStripControlHost(showFeatureOverlayCheckBox);
         scoreThresholdToolLabel = new ToolStripLabel();
         scoreThresholdNumericUpDown = new NumericUpDown();
         scoreThresholdHost = new ToolStripControlHost(scoreThresholdNumericUpDown);
-        angleMinToolLabel = new ToolStripLabel();
-        angleMinNumericUpDown = new NumericUpDown();
-        angleMinHost = new ToolStripControlHost(angleMinNumericUpDown);
-        angleMaxToolLabel = new ToolStripLabel();
-        angleMaxNumericUpDown = new NumericUpDown();
-        angleMaxHost = new ToolStripControlHost(angleMaxNumericUpDown);
-        angleStepToolLabel = new ToolStripLabel();
-        angleStepNumericUpDown = new NumericUpDown();
-        angleStepHost = new ToolStripControlHost(angleStepNumericUpDown);
+        scaleMinToolLabel = new ToolStripLabel();
+        scaleMinNumericUpDown = new NumericUpDown();
+        scaleMinHost = new ToolStripControlHost(scaleMinNumericUpDown);
+        scaleMaxToolLabel = new ToolStripLabel();
+        scaleMaxNumericUpDown = new NumericUpDown();
+        scaleMaxHost = new ToolStripControlHost(scaleMaxNumericUpDown);
+        shapeWeightToolLabel = new ToolStripLabel();
+        shapeWeightNumericUpDown = new NumericUpDown();
+        shapeWeightHost = new ToolStripControlHost(shapeWeightNumericUpDown);
+        shapeSensitivityToolLabel = new ToolStripLabel();
+        shapeSensitivityNumericUpDown = new NumericUpDown();
+        shapeSensitivityHost = new ToolStripControlHost(shapeSensitivityNumericUpDown);
+        shapeRotationCheckBox = new CheckBox();
+        shapeRotationHost = new ToolStripControlHost(shapeRotationCheckBox);
+        shapeFlipCheckBox = new CheckBox();
+        shapeFlipHost = new ToolStripControlHost(shapeFlipCheckBox);
         blurKernelToolLabel = new ToolStripLabel();
         blurKernelNumericUpDown = new NumericUpDown();
         blurKernelHost = new ToolStripControlHost(blurKernelNumericUpDown);
         blackHatKernelToolLabel = new ToolStripLabel();
         blackHatKernelNumericUpDown = new NumericUpDown();
         blackHatKernelHost = new ToolStripControlHost(blackHatKernelNumericUpDown);
-        nmsToolLabel = new ToolStripLabel();
-        nmsNumericUpDown = new NumericUpDown();
-        nmsHost = new ToolStripControlHost(nmsNumericUpDown);
         mainSplitContainer = new SplitContainer();
         previewPictureBox = new PictureBox();
         resultsTabControl = new TabControl();
@@ -198,12 +210,12 @@ partial class MainForm
         ((System.ComponentModel.ISupportInitialize)componentMinAspectNumericUpDown).BeginInit();
         ((System.ComponentModel.ISupportInitialize)componentMaxAspectNumericUpDown).BeginInit();
         ((System.ComponentModel.ISupportInitialize)scoreThresholdNumericUpDown).BeginInit();
-        ((System.ComponentModel.ISupportInitialize)angleMinNumericUpDown).BeginInit();
-        ((System.ComponentModel.ISupportInitialize)angleMaxNumericUpDown).BeginInit();
-        ((System.ComponentModel.ISupportInitialize)angleStepNumericUpDown).BeginInit();
+        ((System.ComponentModel.ISupportInitialize)scaleMinNumericUpDown).BeginInit();
+        ((System.ComponentModel.ISupportInitialize)scaleMaxNumericUpDown).BeginInit();
+        ((System.ComponentModel.ISupportInitialize)shapeWeightNumericUpDown).BeginInit();
+        ((System.ComponentModel.ISupportInitialize)shapeSensitivityNumericUpDown).BeginInit();
         ((System.ComponentModel.ISupportInitialize)blurKernelNumericUpDown).BeginInit();
         ((System.ComponentModel.ISupportInitialize)blackHatKernelNumericUpDown).BeginInit();
-        ((System.ComponentModel.ISupportInitialize)nmsNumericUpDown).BeginInit();
         mainSplitContainer.Panel1.SuspendLayout();
         mainSplitContainer.Panel2.SuspendLayout();
         mainSplitContainer.SuspendLayout();
@@ -231,20 +243,23 @@ partial class MainForm
             processingToolSeparator,
             previewStageToolLabel,
             previewStageComboBox,
+            showFeatureOverlayHost,
             scoreThresholdToolLabel,
             scoreThresholdHost,
-            angleMinToolLabel,
-            angleMinHost,
-            angleMaxToolLabel,
-            angleMaxHost,
-            angleStepToolLabel,
-            angleStepHost,
+            scaleMinToolLabel,
+            scaleMinHost,
+            scaleMaxToolLabel,
+            scaleMaxHost,
+            shapeWeightToolLabel,
+            shapeWeightHost,
+            shapeSensitivityToolLabel,
+            shapeSensitivityHost,
+            shapeRotationHost,
+            shapeFlipHost,
             blurKernelToolLabel,
             blurKernelHost,
             blackHatKernelToolLabel,
-            blackHatKernelHost,
-            nmsToolLabel,
-            nmsHost});
+            blackHatKernelHost});
         mainToolStrip.Location = new Point(0, 0);
         mainToolStrip.Name = "mainToolStrip";
         mainToolStrip.Size = new Size(1100, 25);
@@ -385,7 +400,7 @@ partial class MainForm
         // 
         // componentMinAspectNumericUpDown
         // 
-        componentAspectToolLabel.Text = "H/W";
+        componentAspectToolLabel.Text = "Aspect";
         componentMinAspectNumericUpDown.DecimalPlaces = 1;
         componentMinAspectNumericUpDown.Increment = 0.5M;
         componentMinAspectNumericUpDown.Minimum = 0;
@@ -448,6 +463,17 @@ partial class MainForm
         previewStageComboBox.SelectedIndex = 6;
         previewStageComboBox.SelectedIndexChanged += PreviewStageComboBox_SelectedIndexChanged;
         // 
+        // showFeatureOverlayCheckBox
+        // 
+        showFeatureOverlayCheckBox.AutoSize = true;
+        showFeatureOverlayCheckBox.Text = "Feature Overlay";
+        showFeatureOverlayCheckBox.CheckedChanged += ShowFeatureOverlayCheckBox_CheckedChanged;
+        // 
+        // showFeatureOverlayHost
+        // 
+        showFeatureOverlayHost.Name = "showFeatureOverlayHost";
+        showFeatureOverlayHost.Size = new Size(113, 22);
+        // 
         // scoreThresholdNumericUpDown
         // 
         scoreThresholdToolLabel.Text = "Score";
@@ -459,35 +485,65 @@ partial class MainForm
         scoreThresholdNumericUpDown.Width = 55;
         scoreThresholdNumericUpDown.ValueChanged += ProcessingSettings_ValueChanged;
         // 
-        // angleMinNumericUpDown
+        // scaleMinNumericUpDown
         // 
-        angleMinToolLabel.Text = "Amin";
-        angleMinNumericUpDown.DecimalPlaces = 0;
-        angleMinNumericUpDown.Minimum = -180;
-        angleMinNumericUpDown.Maximum = 180;
-        angleMinNumericUpDown.Value = -30;
-        angleMinNumericUpDown.Width = 50;
-        angleMinNumericUpDown.ValueChanged += ProcessingSettings_ValueChanged;
+        scaleMinToolLabel.Text = "Smin";
+        scaleMinNumericUpDown.DecimalPlaces = 2;
+        scaleMinNumericUpDown.Increment = 0.05M;
+        scaleMinNumericUpDown.Minimum = 0.10M;
+        scaleMinNumericUpDown.Maximum = 5;
+        scaleMinNumericUpDown.Value = 0.90M;
+        scaleMinNumericUpDown.Width = 55;
+        scaleMinNumericUpDown.ValueChanged += ProcessingSettings_ValueChanged;
         // 
-        // angleMaxNumericUpDown
+        // scaleMaxNumericUpDown
         // 
-        angleMaxToolLabel.Text = "Amax";
-        angleMaxNumericUpDown.DecimalPlaces = 0;
-        angleMaxNumericUpDown.Minimum = -180;
-        angleMaxNumericUpDown.Maximum = 180;
-        angleMaxNumericUpDown.Value = 30;
-        angleMaxNumericUpDown.Width = 50;
-        angleMaxNumericUpDown.ValueChanged += ProcessingSettings_ValueChanged;
+        scaleMaxToolLabel.Text = "Smax";
+        scaleMaxNumericUpDown.DecimalPlaces = 2;
+        scaleMaxNumericUpDown.Increment = 0.05M;
+        scaleMaxNumericUpDown.Minimum = 0.10M;
+        scaleMaxNumericUpDown.Maximum = 5;
+        scaleMaxNumericUpDown.Value = 1.10M;
+        scaleMaxNumericUpDown.Width = 55;
+        scaleMaxNumericUpDown.ValueChanged += ProcessingSettings_ValueChanged;
         // 
-        // angleStepNumericUpDown
+        // shapeWeightNumericUpDown
         // 
-        angleStepToolLabel.Text = "Astep";
-        angleStepNumericUpDown.DecimalPlaces = 0;
-        angleStepNumericUpDown.Minimum = 1;
-        angleStepNumericUpDown.Maximum = 45;
-        angleStepNumericUpDown.Value = 2;
-        angleStepNumericUpDown.Width = 45;
-        angleStepNumericUpDown.ValueChanged += ProcessingSettings_ValueChanged;
+        shapeWeightToolLabel.Text = "ShapeW";
+        shapeWeightNumericUpDown.DecimalPlaces = 2;
+        shapeWeightNumericUpDown.Increment = 0.05M;
+        shapeWeightNumericUpDown.Minimum = 0;
+        shapeWeightNumericUpDown.Maximum = 1;
+        shapeWeightNumericUpDown.Value = 0.85M;
+        shapeWeightNumericUpDown.Width = 55;
+        shapeWeightNumericUpDown.ValueChanged += ProcessingSettings_ValueChanged;
+        // 
+        // shapeSensitivityNumericUpDown
+        // 
+        shapeSensitivityToolLabel.Text = "ShapeSens";
+        shapeSensitivityNumericUpDown.DecimalPlaces = 1;
+        shapeSensitivityNumericUpDown.Increment = 0.5M;
+        shapeSensitivityNumericUpDown.Minimum = 0.1M;
+        shapeSensitivityNumericUpDown.Maximum = 100;
+        shapeSensitivityNumericUpDown.Value = 16.0M;
+        shapeSensitivityNumericUpDown.Width = 60;
+        shapeSensitivityNumericUpDown.ValueChanged += ProcessingSettings_ValueChanged;
+        // 
+        // shapeRotationCheckBox
+        // 
+        shapeRotationCheckBox.AutoSize = true;
+        shapeRotationCheckBox.Checked = true;
+        shapeRotationCheckBox.CheckState = CheckState.Checked;
+        shapeRotationCheckBox.Text = "Rot";
+        shapeRotationCheckBox.CheckedChanged += ProcessingSettings_ValueChanged;
+        // 
+        // shapeFlipCheckBox
+        // 
+        shapeFlipCheckBox.AutoSize = true;
+        shapeFlipCheckBox.Checked = true;
+        shapeFlipCheckBox.CheckState = CheckState.Checked;
+        shapeFlipCheckBox.Text = "Flip";
+        shapeFlipCheckBox.CheckedChanged += ProcessingSettings_ValueChanged;
         // 
         // blurKernelNumericUpDown
         // 
@@ -506,17 +562,6 @@ partial class MainForm
         blackHatKernelNumericUpDown.Value = 11;
         blackHatKernelNumericUpDown.Width = 45;
         blackHatKernelNumericUpDown.ValueChanged += ProcessingSettings_ValueChanged;
-        // 
-        // nmsNumericUpDown
-        // 
-        nmsToolLabel.Text = "NMS";
-        nmsNumericUpDown.DecimalPlaces = 2;
-        nmsNumericUpDown.Increment = 0.05M;
-        nmsNumericUpDown.Minimum = 0;
-        nmsNumericUpDown.Maximum = 1;
-        nmsNumericUpDown.Value = 0.35M;
-        nmsNumericUpDown.Width = 55;
-        nmsNumericUpDown.ValueChanged += ProcessingSettings_ValueChanged;
         // 
         // mainSplitContainer
         // 
@@ -684,12 +729,12 @@ partial class MainForm
         ((System.ComponentModel.ISupportInitialize)resultsGridView).EndInit();
         ((System.ComponentModel.ISupportInitialize)componentsGridView).EndInit();
         ((System.ComponentModel.ISupportInitialize)scoreThresholdNumericUpDown).EndInit();
-        ((System.ComponentModel.ISupportInitialize)angleMinNumericUpDown).EndInit();
-        ((System.ComponentModel.ISupportInitialize)angleMaxNumericUpDown).EndInit();
-        ((System.ComponentModel.ISupportInitialize)angleStepNumericUpDown).EndInit();
+        ((System.ComponentModel.ISupportInitialize)scaleMinNumericUpDown).EndInit();
+        ((System.ComponentModel.ISupportInitialize)scaleMaxNumericUpDown).EndInit();
+        ((System.ComponentModel.ISupportInitialize)shapeWeightNumericUpDown).EndInit();
+        ((System.ComponentModel.ISupportInitialize)shapeSensitivityNumericUpDown).EndInit();
         ((System.ComponentModel.ISupportInitialize)blurKernelNumericUpDown).EndInit();
         ((System.ComponentModel.ISupportInitialize)blackHatKernelNumericUpDown).EndInit();
-        ((System.ComponentModel.ISupportInitialize)nmsNumericUpDown).EndInit();
         ((System.ComponentModel.ISupportInitialize)componentThresholdNumericUpDown).EndInit();
         ((System.ComponentModel.ISupportInitialize)componentOpenNumericUpDown).EndInit();
         ((System.ComponentModel.ISupportInitialize)componentCloseNumericUpDown).EndInit();
