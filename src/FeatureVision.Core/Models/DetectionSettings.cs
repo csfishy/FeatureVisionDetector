@@ -180,7 +180,7 @@ public sealed class DetectionSettings
     /// <summary>
     /// Weight of shape similarity in the final component score when reference masks are available.
     /// </summary>
-    public double ComponentShapeScoreWeight { get; set; } = 0.95;
+    public double ComponentShapeScoreWeight { get; set; } = 0.85;
 
     /// <summary>
     /// Number of vertical samples used when comparing normalized component centerlines.
