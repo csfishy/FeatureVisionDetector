@@ -936,7 +936,8 @@ public partial class MainForm : Form
 
     private static Bitmap CreateComponentOverlayBitmap(
         Bitmap source,
-        IReadOnlyList<ConnectedComponentResult> components)
+        IReadOnlyList<ConnectedComponentResult> components,
+        Mat? componentBinaryMask = null)
     {
         var overlay = new Bitmap(source);
         using var graphics = Graphics.FromImage(overlay);
@@ -950,6 +951,7 @@ public partial class MainForm : Form
         {
             var box = component.BoundingBox;
             var rectangle = new Rectangle(box.X, box.Y, box.Width, box.Height);
+            DrawComponentTargetMask(graphics, componentBinaryMask, component);
             graphics.DrawRectangle(boxPen, rectangle);
 
             var centerX = (float)component.Center.X;
@@ -969,6 +971,130 @@ public partial class MainForm : Form
         }
 
         return overlay;
+    }
+
+    private static void DrawComponentTargetMask(
+        Graphics graphics,
+        Mat? componentBinaryMask,
+        ConnectedComponentResult component)
+    {
+        if (componentBinaryMask is null || componentBinaryMask.Empty())
+        {
+            return;
+        }
+
+        var seedPoint = FindComponentMaskSeed(componentBinaryMask, component);
+        if (seedPoint is null)
+        {
+            return;
+        }
+
+        using var floodSource = componentBinaryMask.Clone();
+        using var floodMask = new Mat(
+            componentBinaryMask.Rows + 2,
+            componentBinaryMask.Cols + 2,
+            MatType.CV_8UC1,
+            Scalar.Black);
+        Cv2.FloodFill(
+            floodSource,
+            floodMask,
+            seedPoint.Value,
+            Scalar.Gray,
+            out _,
+            Scalar.All(0),
+            Scalar.All(0),
+            FloodFillFlags.Link8);
+
+        using var componentMask = new Mat(componentBinaryMask.Size(), MatType.CV_8UC1, Scalar.Black);
+        var floodMaskInner = new OpenCvSharp.Rect(1, 1, componentBinaryMask.Cols, componentBinaryMask.Rows);
+        using (var innerMask = new Mat(floodMask, floodMaskInner))
+        {
+            Cv2.Compare(innerMask, Scalar.All(0), componentMask, CmpTypes.GT);
+        }
+
+        using var targetOverlay = CreateTintedMaskBitmap(componentMask, Color.FromArgb(105, 135, 220, 255));
+        graphics.DrawImageUnscaled(targetOverlay, 0, 0);
+    }
+
+    private static OpenCvSharp.Point? FindComponentMaskSeed(
+        Mat componentBinaryMask,
+        ConnectedComponentResult component)
+    {
+        var centerX = Math.Clamp((int)Math.Round(component.Center.X), 0, componentBinaryMask.Cols - 1);
+        var centerY = Math.Clamp((int)Math.Round(component.Center.Y), 0, componentBinaryMask.Rows - 1);
+        if (componentBinaryMask.At<byte>(centerY, centerX) != 0)
+        {
+            return new OpenCvSharp.Point(centerX, centerY);
+        }
+
+        var box = component.BoundingBox;
+        var left = Math.Clamp(box.X, 0, componentBinaryMask.Cols - 1);
+        var top = Math.Clamp(box.Y, 0, componentBinaryMask.Rows - 1);
+        var right = Math.Clamp(box.X + box.Width, left + 1, componentBinaryMask.Cols);
+        var bottom = Math.Clamp(box.Y + box.Height, top + 1, componentBinaryMask.Rows);
+        var bestDistance = double.MaxValue;
+        OpenCvSharp.Point? bestPoint = null;
+
+        for (var y = top; y < bottom; y++)
+        {
+            for (var x = left; x < right; x++)
+            {
+                if (componentBinaryMask.At<byte>(y, x) == 0)
+                {
+                    continue;
+                }
+
+                var dx = x - component.Center.X;
+                var dy = y - component.Center.Y;
+                var distance = dx * dx + dy * dy;
+                if (distance >= bestDistance)
+                {
+                    continue;
+                }
+
+                bestDistance = distance;
+                bestPoint = new OpenCvSharp.Point(x, y);
+            }
+        }
+
+        return bestPoint;
+    }
+
+    private static Bitmap CreateTintedMaskBitmap(Mat binaryMask, Color color)
+    {
+        var bitmap = new Bitmap(binaryMask.Width, binaryMask.Height, PixelFormat.Format32bppArgb);
+        var bounds = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+        var bitmapData = bitmap.LockBits(bounds, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+
+        try
+        {
+            var stride = Math.Abs(bitmapData.Stride);
+            var pixels = new byte[stride * bitmap.Height];
+            for (var y = 0; y < binaryMask.Rows; y++)
+            {
+                for (var x = 0; x < binaryMask.Cols; x++)
+                {
+                    if (binaryMask.At<byte>(y, x) == 0)
+                    {
+                        continue;
+                    }
+
+                    var offset = y * stride + x * 4;
+                    pixels[offset] = color.B;
+                    pixels[offset + 1] = color.G;
+                    pixels[offset + 2] = color.R;
+                    pixels[offset + 3] = color.A;
+                }
+            }
+
+            Marshal.Copy(pixels, 0, bitmapData.Scan0, pixels.Length);
+        }
+        finally
+        {
+            bitmap.UnlockBits(bitmapData);
+        }
+
+        return bitmap;
     }
 
     private void SetPreviewImage(Image image)
@@ -1310,9 +1436,13 @@ public partial class MainForm : Form
         if (stage == RuntimePreviewStage.Overlay && allowOverlay)
         {
             using var rawBitmap = ConvertMatToBitmap(frame);
-            return showComponentOverlay
-                ? CreateComponentOverlayBitmap(rawBitmap, selectedComponents)
-                : CreateOverlayBitmap(rawBitmap, selectedResults, referenceFeatureMask, highlightedResult, matchCount);
+            if (showComponentOverlay)
+            {
+                using var componentBinaryMask = CreateBlackHatComponentBinaryMask(frame);
+                return CreateComponentOverlayBitmap(rawBitmap, selectedComponents, componentBinaryMask);
+            }
+
+            return CreateOverlayBitmap(rawBitmap, selectedResults, referenceFeatureMask, highlightedResult, matchCount);
         }
 
         if (stage == RuntimePreviewStage.Raw || stage == RuntimePreviewStage.Overlay)
@@ -1345,7 +1475,14 @@ public partial class MainForm : Form
         }
 
         using var responseBitmap = ConvertMatToBitmap(response);
-        return CreateComponentOverlayBitmap(responseBitmap, selectedComponents);
+        return CreateComponentOverlayBitmap(responseBitmap, selectedComponents, binary);
+    }
+
+    private Mat CreateBlackHatComponentBinaryMask(Mat frame)
+    {
+        using var gray = TemplateFeatureMatcher.ToGray(frame);
+        using var response = TemplateFeatureMatcher.CreateDarkFeatureResponse(gray, CurrentSettings);
+        return blackHatComponentDetector.CreateBinaryMask(response, CurrentSettings);
     }
 
     private IReadOnlyList<DetectionResult> GetCheckedResults()
