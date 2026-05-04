@@ -14,6 +14,8 @@ namespace FeatureVision.RuntimeApp.Forms;
 
 public partial class MainForm : Form
 {
+    private const string MatchOverlayColumnName = "ShowOverlay";
+
     private readonly CameraService cameraService = new();
     private readonly FeatureFileReader featureFileReader = new();
     private readonly BlackHatComponentDetector blackHatComponentDetector = new();
@@ -34,6 +36,7 @@ public partial class MainForm : Form
     private IReadOnlyList<DetectionResult> lastStaticResults = Array.Empty<DetectionResult>();
     private IReadOnlyList<ConnectedComponentResult> lastComponents = Array.Empty<ConnectedComponentResult>();
     private bool isUpdatingSettingsUi;
+    private bool isUpdatingResultsGrid;
 
     public MainForm()
     {
@@ -112,6 +115,17 @@ public partial class MainForm : Form
     private void InitializeResultsGrid()
     {
         resultsGridView.Columns.Clear();
+        resultsGridView.Columns.Add(new DataGridViewCheckBoxColumn
+        {
+            Name = MatchOverlayColumnName,
+            HeaderText = string.Empty,
+            Width = 36,
+            FillWeight = 25,
+            ReadOnly = false,
+            ThreeState = false,
+            TrueValue = true,
+            FalseValue = false
+        });
         resultsGridView.Columns.Add("CenterX", "CenterX");
         resultsGridView.Columns.Add("CenterY", "CenterY");
         resultsGridView.Columns.Add("Angle", "Angle");
@@ -119,8 +133,18 @@ public partial class MainForm : Form
         resultsGridView.Columns.Add("Scale", "Scale");
         resultsGridView.Columns.Add("Transform", "Mode");
         resultsGridView.Columns.Add("BoundingBox", "BoundingBox");
+        resultsGridView.ReadOnly = false;
+        resultsGridView.EditMode = DataGridViewEditMode.EditOnEnter;
         resultsGridView.MultiSelect = false;
         resultsGridView.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+
+        foreach (DataGridViewColumn column in resultsGridView.Columns)
+        {
+            column.ReadOnly = column.Name != MatchOverlayColumnName;
+        }
+
+        resultsGridView.CurrentCellDirtyStateChanged += ResultsGridView_CurrentCellDirtyStateChanged;
+        resultsGridView.CellValueChanged += ResultsGridView_CellValueChanged;
     }
 
     private void InitializeComponentsGrid()
@@ -274,6 +298,33 @@ public partial class MainForm : Form
 
     private void ResultsGridView_SelectionChanged(object? sender, EventArgs e)
     {
+        if (isUpdatingResultsGrid)
+        {
+            return;
+        }
+
+        RefreshStaticPreview();
+    }
+
+    private void ResultsGridView_CurrentCellDirtyStateChanged(object? sender, EventArgs e)
+    {
+        if (resultsGridView.IsCurrentCellDirty &&
+            resultsGridView.CurrentCell?.OwningColumn?.Name == MatchOverlayColumnName)
+        {
+            resultsGridView.CommitEdit(DataGridViewDataErrorContexts.Commit);
+        }
+    }
+
+    private void ResultsGridView_CellValueChanged(object? sender, DataGridViewCellEventArgs e)
+    {
+        if (isUpdatingResultsGrid ||
+            e.RowIndex < 0 ||
+            e.ColumnIndex < 0 ||
+            resultsGridView.Columns[e.ColumnIndex].Name != MatchOverlayColumnName)
+        {
+            return;
+        }
+
         RefreshStaticPreview();
     }
 
@@ -392,24 +443,34 @@ public partial class MainForm : Form
 
     private void PopulateResults(IReadOnlyList<DetectionResult> results)
     {
-        resultsGridView.Rows.Clear();
-        foreach (var result in results)
+        isUpdatingResultsGrid = true;
+        try
         {
-            var rowIndex = resultsGridView.Rows.Add(
-                result.Center.X.ToString("0.0"),
-                result.Center.Y.ToString("0.0"),
-                result.RotationAngleDegrees.ToString("0.0"),
-                result.MatchingScore.ToString("0.000"),
-                result.Scale.ToString("0.00"),
-                result.ShapeTransform,
-                $"{result.BoundingBox.X}, {result.BoundingBox.Y}, {result.BoundingBox.Width}, {result.BoundingBox.Height}");
-            resultsGridView.Rows[rowIndex].Tag = result;
-        }
+            resultsGridView.Rows.Clear();
+            foreach (var result in results)
+            {
+                var rowIndex = resultsGridView.Rows.Add(
+                    true,
+                    result.Center.X.ToString("0.0"),
+                    result.Center.Y.ToString("0.0"),
+                    result.RotationAngleDegrees.ToString("0.0"),
+                    result.MatchingScore.ToString("0.000"),
+                    result.Scale.ToString("0.00"),
+                    result.ShapeTransform,
+                    $"{result.BoundingBox.X}, {result.BoundingBox.Y}, {result.BoundingBox.Width}, {result.BoundingBox.Height}");
+                resultsGridView.Rows[rowIndex].Tag = result;
+            }
 
-        resultsGridView.ClearSelection();
-        if (resultsGridView.Rows.Count > 0)
+            resultsGridView.ClearSelection();
+            if (resultsGridView.Rows.Count > 0)
+            {
+                resultsGridView.Rows[0].Selected = true;
+                resultsGridView.CurrentCell = resultsGridView.Rows[0].Cells[1];
+            }
+        }
+        finally
         {
-            resultsGridView.Rows[0].Selected = true;
+            isUpdatingResultsGrid = false;
         }
     }
 
@@ -485,60 +546,124 @@ public partial class MainForm : Form
         using var referenceFeatureMask = isFeatureOverlayEnabled
             ? CreateReferenceFeatureMaskSnapshot()
             : null;
-        var overlay = CreateOverlayBitmap(testImageBitmap, GetSelectedResults(), referenceFeatureMask);
+        var overlay = CreateOverlayBitmap(
+            testImageBitmap,
+            GetCheckedResults(),
+            referenceFeatureMask,
+            GetHighlightedResult(),
+            lastStaticResults.Count);
         SetPreviewImage(overlay);
     }
 
     private static Bitmap CreateOverlayBitmap(
         Bitmap source,
         IReadOnlyList<DetectionResult> results,
-        Mat? referenceFeatureMask = null)
+        Mat? referenceFeatureMask = null,
+        DetectionResult? highlightedResult = null,
+        int matchCount = -1)
     {
         var overlay = new Bitmap(source);
         using var graphics = Graphics.FromImage(overlay);
-        using var boxPen = new Pen(Color.Lime, 2.0f);
+        var labelFont = SystemFonts.MessageBoxFont ?? SystemFonts.DefaultFont;
+        var displayResults = results.ToList();
+        var highlightedDisplayResult = highlightedResult is null
+            ? null
+            : displayResults.FirstOrDefault(result => ReferenceEquals(result, highlightedResult));
+
+        foreach (var result in displayResults)
+        {
+            if (ReferenceEquals(result, highlightedDisplayResult))
+            {
+                continue;
+            }
+
+            DrawDetectionOverlay(graphics, referenceFeatureMask, result, labelFont, isHighlighted: false);
+        }
+
+        if (highlightedDisplayResult is not null)
+        {
+            DrawDetectionOverlay(graphics, referenceFeatureMask, highlightedDisplayResult, labelFont, isHighlighted: true);
+        }
+
+        DrawResultsCountOverlay(graphics, source.Size, matchCount >= 0 ? matchCount : displayResults.Count);
+
+        return overlay;
+    }
+
+    private static void DrawResultsCountOverlay(Graphics graphics, System.Drawing.Size imageSize, int matchCount)
+    {
+        var fontSize = (float)Math.Max(18.0, Math.Min(42.0, Math.Min(imageSize.Width, imageSize.Height) * 0.035));
+        var baseFont = SystemFonts.MessageBoxFont ?? SystemFonts.DefaultFont;
+        using var countFont = new Font(baseFont.FontFamily, fontSize, FontStyle.Bold);
+        using var textBrush = new SolidBrush(Color.White);
+        using var backgroundBrush = new SolidBrush(Color.FromArgb(210, 0, 0, 0));
+        using var borderPen = new Pen(Color.Yellow, Math.Max(2.0f, fontSize * 0.08f));
+
+        var text = $"Results: {matchCount}";
+        var textSize = graphics.MeasureString(text, countFont);
+        var padding = Math.Max(8.0f, fontSize * 0.4f);
+        var bounds = new RectangleF(
+            padding,
+            padding,
+            textSize.Width + padding * 2.0f,
+            textSize.Height + padding * 1.4f);
+
+        graphics.FillRectangle(backgroundBrush, bounds);
+        graphics.DrawRectangle(borderPen, bounds.X, bounds.Y, bounds.Width, bounds.Height);
+        graphics.DrawString(text, countFont, textBrush, bounds.X + padding, bounds.Y + padding * 0.7f);
+    }
+
+    private static void DrawDetectionOverlay(
+        Graphics graphics,
+        Mat? referenceFeatureMask,
+        DetectionResult result,
+        Font labelFont,
+        bool isHighlighted)
+    {
+        var box = result.BoundingBox;
+        var rectangle = new Rectangle(box.X, box.Y, box.Width, box.Height);
+        var boxColor = isHighlighted ? Color.Red : Color.Lime;
+        var featureOverlayColor = isHighlighted
+            ? Color.FromArgb(135, Color.Red)
+            : Color.FromArgb(105, Color.DeepSkyBlue);
+
+        DrawReferenceFeatureMask(graphics, referenceFeatureMask, result, rectangle, featureOverlayColor);
+
+        using var boxPen = new Pen(boxColor, isHighlighted ? 3.0f : 2.0f);
         using var centerPen = new Pen(Color.Yellow, 2.0f);
         using var anglePen = new Pen(Color.DeepSkyBlue, 2.0f);
         using var labelBrush = new SolidBrush(Color.Yellow);
         using var labelBackgroundBrush = new SolidBrush(Color.FromArgb(160, Color.Black));
-        var labelFont = SystemFonts.MessageBoxFont ?? SystemFonts.DefaultFont;
 
-        foreach (var result in results)
-        {
-            var box = result.BoundingBox;
-            var rectangle = new Rectangle(box.X, box.Y, box.Width, box.Height);
-            DrawReferenceFeatureMask(graphics, referenceFeatureMask, result, rectangle);
-            graphics.DrawRectangle(boxPen, rectangle);
+        graphics.DrawRectangle(boxPen, rectangle);
 
-            var centerX = (float)result.Center.X;
-            var centerY = (float)result.Center.Y;
-            graphics.DrawLine(centerPen, centerX - 6, centerY, centerX + 6, centerY);
-            graphics.DrawLine(centerPen, centerX, centerY - 6, centerX, centerY + 6);
+        var centerX = (float)result.Center.X;
+        var centerY = (float)result.Center.Y;
+        graphics.DrawLine(centerPen, centerX - 6, centerY, centerX + 6, centerY);
+        graphics.DrawLine(centerPen, centerX, centerY - 6, centerX, centerY + 6);
 
-            var angleRadians = result.RotationAngleDegrees * Math.PI / 180.0;
-            var angleLength = Math.Max(20.0f, Math.Min(rectangle.Width, rectangle.Height) / 2.0f);
-            graphics.DrawLine(
-                anglePen,
-                centerX,
-                centerY,
-                centerX + (float)(Math.Cos(angleRadians) * angleLength),
-                centerY + (float)(Math.Sin(angleRadians) * angleLength));
+        var angleRadians = result.RotationAngleDegrees * Math.PI / 180.0;
+        var angleLength = Math.Max(20.0f, Math.Min(rectangle.Width, rectangle.Height) / 2.0f);
+        graphics.DrawLine(
+            anglePen,
+            centerX,
+            centerY,
+            centerX + (float)(Math.Cos(angleRadians) * angleLength),
+            centerY + (float)(Math.Sin(angleRadians) * angleLength));
 
-            var label = $"{result.MatchingScore:0.000}  S:{result.Scale:0.00}  {result.RotationAngleDegrees:0.0} deg";
-            var labelSize = graphics.MeasureString(label, labelFont);
-            var labelBounds = new RectangleF(rectangle.Left, Math.Max(0, rectangle.Top - labelSize.Height), labelSize.Width, labelSize.Height);
-            graphics.FillRectangle(labelBackgroundBrush, labelBounds);
-            graphics.DrawString(label, labelFont, labelBrush, labelBounds.Location);
-        }
-
-        return overlay;
+        var label = $"{result.MatchingScore:0.000}  S:{result.Scale:0.00}  {result.RotationAngleDegrees:0.0} deg";
+        var labelSize = graphics.MeasureString(label, labelFont);
+        var labelBounds = new RectangleF(rectangle.Left, Math.Max(0, rectangle.Top - labelSize.Height), labelSize.Width, labelSize.Height);
+        graphics.FillRectangle(labelBackgroundBrush, labelBounds);
+        graphics.DrawString(label, labelFont, labelBrush, labelBounds.Location);
     }
 
     private static void DrawReferenceFeatureMask(
         Graphics graphics,
         Mat? referenceFeatureMask,
         DetectionResult result,
-        Rectangle matchRectangle)
+        Rectangle matchRectangle,
+        Color overlayColor)
     {
         if (referenceFeatureMask is null ||
             referenceFeatureMask.Empty() ||
@@ -550,7 +675,7 @@ public partial class MainForm : Form
 
         using var featureOverlay = CreateTintedFeatureMaskOverlay(
             referenceFeatureMask,
-            Color.FromArgb(105, Color.DeepSkyBlue));
+            overlayColor);
         if (featureOverlay is null)
         {
             return;
@@ -931,7 +1056,7 @@ public partial class MainForm : Form
             }
             stopwatch.Stop();
 
-            selectedResults = SelectDisplayResults(results);
+            selectedResults = results;
             using var referenceFeatureMask = isFeatureOverlayEnabled
                 ? CreateReferenceFeatureMaskSnapshot()
                 : null;
@@ -941,7 +1066,8 @@ public partial class MainForm : Form
                 Array.Empty<ConnectedComponentResult>(),
                 allowOverlay: true,
                 showComponentOverlay: false,
-                referenceFeatureMask);
+                referenceFeatureMask,
+                matchCount: results.Count);
             processingText = $"Processing: {stopwatch.ElapsedMilliseconds} ms";
         }
         else
@@ -1158,11 +1284,13 @@ public partial class MainForm : Form
             : null;
         var bitmap = CreatePreviewBitmap(
             frame,
-            GetSelectedResults(),
+            GetCheckedResults(),
             GetSelectedComponents(),
             allowOverlay: true,
             showComponentOverlay: resultsTabControl.SelectedTab == componentsTabPage,
-            referenceFeatureMask);
+            referenceFeatureMask,
+            GetHighlightedResult(),
+            lastStaticResults.Count);
         SetPreviewImage(bitmap);
     }
 
@@ -1172,7 +1300,9 @@ public partial class MainForm : Form
         IReadOnlyList<ConnectedComponentResult> selectedComponents,
         bool allowOverlay,
         bool showComponentOverlay,
-        Mat? referenceFeatureMask)
+        Mat? referenceFeatureMask,
+        DetectionResult? highlightedResult = null,
+        int matchCount = -1)
     {
         ApplySettingsUiToSettings(CurrentSettings);
         var stage = CurrentPreviewStage;
@@ -1182,7 +1312,7 @@ public partial class MainForm : Form
             using var rawBitmap = ConvertMatToBitmap(frame);
             return showComponentOverlay
                 ? CreateComponentOverlayBitmap(rawBitmap, selectedComponents)
-                : CreateOverlayBitmap(rawBitmap, selectedResults, referenceFeatureMask);
+                : CreateOverlayBitmap(rawBitmap, selectedResults, referenceFeatureMask, highlightedResult, matchCount);
         }
 
         if (stage == RuntimePreviewStage.Raw || stage == RuntimePreviewStage.Overlay)
@@ -1218,18 +1348,32 @@ public partial class MainForm : Form
         return CreateComponentOverlayBitmap(responseBitmap, selectedComponents);
     }
 
-    private IReadOnlyList<DetectionResult> GetSelectedResults()
+    private IReadOnlyList<DetectionResult> GetCheckedResults()
     {
-        if (resultsGridView.SelectedRows.Count == 0)
-        {
-            return Array.Empty<DetectionResult>();
-        }
-
-        return resultsGridView.SelectedRows
+        return resultsGridView.Rows
             .Cast<DataGridViewRow>()
+            .Where(IsResultRowChecked)
             .Select(row => row.Tag)
             .OfType<DetectionResult>()
             .ToList();
+    }
+
+    private DetectionResult? GetHighlightedResult()
+    {
+        if (resultsGridView.SelectedRows.Count == 0)
+        {
+            return null;
+        }
+
+        var selectedRow = resultsGridView.SelectedRows
+            .Cast<DataGridViewRow>()
+            .FirstOrDefault();
+        return selectedRow?.Tag as DetectionResult;
+    }
+
+    private static bool IsResultRowChecked(DataGridViewRow row)
+    {
+        return row.Cells[MatchOverlayColumnName].Value is bool isChecked && isChecked;
     }
 
     private IReadOnlyList<ConnectedComponentResult> GetSelectedComponents()
@@ -1258,16 +1402,6 @@ public partial class MainForm : Form
         centerYStatusLabel.Text = $"CenterY: {selectedComponent.Center.Y:0.0}";
         angleStatusLabel.Text = $"Angle: {selectedComponent.RotationAngleDegrees:0.0}";
         scoreStatusLabel.Text = $"Score: {selectedComponent.Score:0.000}";
-    }
-
-    private static IReadOnlyList<DetectionResult> SelectDisplayResults(IReadOnlyList<DetectionResult> results)
-    {
-        if (results.Count == 0)
-        {
-            return Array.Empty<DetectionResult>();
-        }
-
-        return new[] { results.OrderByDescending(result => result.MatchingScore).First() };
     }
 
     private static decimal ClampDecimal(decimal value, decimal minimum, decimal maximum)
