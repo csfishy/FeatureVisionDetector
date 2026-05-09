@@ -10,12 +10,15 @@ namespace FeatureVision.AnnotationTool.Forms;
 
 public partial class MainForm : Form
 {
+    private readonly FeatureFileReader featureFileReader = new();
     private readonly FeatureFileWriter featureFileWriter = new();
     private readonly GeometryAnalyzer geometryAnalyzer = new();
     private readonly BlackHatComponentDetector blackHatComponentDetector = new();
     private readonly DetectionSettings componentSettings = new();
     private readonly List<AnnotatedImage> annotatedImages = new();
     private IReadOnlyList<ConnectedComponentResult> lastComponents = Array.Empty<ConnectedComponentResult>();
+    private string? packageAssetDirectory;
+    private bool isUpdatingComponentSettingsUi;
 
     public MainForm()
     {
@@ -56,6 +59,7 @@ public partial class MainForm : Form
         rectangleToolButton.Checked = toolMode == AnnotationToolMode.RectangleRoi;
         brushToolButton.Checked = toolMode == AnnotationToolMode.Brush;
         eraserToolButton.Checked = toolMode == AnnotationToolMode.Eraser;
+        measurementBoxToolButton.Checked = toolMode == AnnotationToolMode.MeasurementBox;
     }
 
     private void InitializeComponentsGrid()
@@ -101,6 +105,50 @@ public partial class MainForm : Form
         }
     }
 
+    public async Task LoadFeaturePackageAsync(
+        string packagePath,
+        CancellationToken cancellationToken = default)
+    {
+        var tempDirectory = CreatePackageAssetDirectory();
+        var loadedImages = new List<AnnotatedImage>();
+        var loadCompleted = false;
+
+        try
+        {
+            var manifest = await featureFileReader
+                .ReadAndExtractAssetsAsync(packagePath, tempDirectory, cancellationToken)
+                .ConfigureAwait(true);
+
+            CopyDetectionSettings(manifest.DetectionSettings, componentSettings);
+
+            foreach (var sample in manifest.FeatureModel.Samples)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var displayName = GetSampleDisplayName(sample);
+                var annotatedImage = new AnnotatedImage(sample.ImagePath, sample.MaskPath, displayName);
+                UpdateGeometry(annotatedImage);
+                loadedImages.Add(annotatedImage);
+            }
+
+            ReplaceAnnotatedImages(loadedImages, tempDirectory);
+            loadCompleted = true;
+            SyncComponentSettingsUiFromSettings(componentSettings);
+            componentStatusLabel.Text = $"Package loaded: {Path.GetFileName(packagePath)}";
+        }
+        finally
+        {
+            if (!loadCompleted)
+            {
+                foreach (var loadedImage in loadedImages)
+                {
+                    loadedImage.Dispose();
+                }
+
+                TryDeleteDirectory(tempDirectory);
+            }
+        }
+    }
+
     private FeatureFileManifest CreateManifest(string tempDirectory)
     {
         ApplyComponentSettingsUi();
@@ -125,7 +173,7 @@ public partial class MainForm : Form
             manifest.FeatureModel.Samples.Add(new FeatureSample
             {
                 Id = $"sample-{index + 1:0000}",
-                Name = Path.GetFileNameWithoutExtension(annotatedImage.ImagePath),
+                Name = Path.GetFileNameWithoutExtension(annotatedImage.DisplayName),
                 ImagePath = annotatedImage.ImagePath,
                 MaskPath = maskPath,
                 ImageSize = new Size2D
@@ -145,36 +193,9 @@ public partial class MainForm : Form
 
     private DetectionSettings CreateDetectionSettingsSnapshot()
     {
-        return new DetectionSettings
-        {
-            ScoreThreshold = componentSettings.ScoreThreshold,
-            AngleMin = componentSettings.AngleMin,
-            AngleMax = componentSettings.AngleMax,
-            AngleStep = componentSettings.AngleStep,
-            ScaleMin = componentSettings.ScaleMin,
-            ScaleMax = componentSettings.ScaleMax,
-            ScaleStep = componentSettings.ScaleStep,
-            BlurKernelSize = componentSettings.BlurKernelSize,
-            BlackHatKernelSize = componentSettings.BlackHatKernelSize,
-            MaskRefinementDilateSize = componentSettings.MaskRefinementDilateSize,
-            NmsOverlapThreshold = componentSettings.NmsOverlapThreshold,
-            MaximumDetections = componentSettings.MaximumDetections,
-            ComponentThreshold = componentSettings.ComponentThreshold,
-            ComponentOpenKernelSize = componentSettings.ComponentOpenKernelSize,
-            ComponentCloseKernelSize = componentSettings.ComponentCloseKernelSize,
-            ComponentMinArea = componentSettings.ComponentMinArea,
-            ComponentMaxArea = componentSettings.ComponentMaxArea,
-            ComponentMinWidth = componentSettings.ComponentMinWidth,
-            ComponentMaxWidth = componentSettings.ComponentMaxWidth,
-            ComponentMinHeight = componentSettings.ComponentMinHeight,
-            ComponentMaxHeight = componentSettings.ComponentMaxHeight,
-            ComponentMinAspectRatio = componentSettings.ComponentMinAspectRatio,
-            ComponentMaxAspectRatio = componentSettings.ComponentMaxAspectRatio,
-            ComponentShapeScoreWeight = componentSettings.ComponentShapeScoreWeight,
-            ComponentShapeProfileSamples = componentSettings.ComponentShapeProfileSamples,
-            ComponentShapeDistanceSensitivity = componentSettings.ComponentShapeDistanceSensitivity,
-            RegionOfInterest = componentSettings.RegionOfInterest
-        };
+        var settings = new DetectionSettings();
+        CopyDetectionSettings(componentSettings, settings);
+        return settings;
     }
 
     private void OpenImagesButton_Click(object? sender, EventArgs e)
@@ -198,6 +219,35 @@ public partial class MainForm : Form
         catch (Exception ex) when (ex is IOException or ArgumentException or OutOfMemoryException)
         {
             MessageBox.Show(this, ex.Message, "Open Images", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private async void LoadPackageButton_Click(object? sender, EventArgs e)
+    {
+        using var dialog = new OpenFileDialog
+        {
+            Title = "Load Feature Package",
+            Filter = "Feature Package|*.featurepkg;*.fvfeature|All Files|*.*"
+        };
+
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        try
+        {
+            loadPackageButton.Enabled = false;
+            await LoadFeaturePackageAsync(dialog.FileName);
+            MessageBox.Show(this, "Feature package loaded.", "Load Feature Package", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or OutOfMemoryException or OpenCVException)
+        {
+            MessageBox.Show(this, ex.Message, "Load Feature Package", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            loadPackageButton.Enabled = true;
         }
     }
 
@@ -247,6 +297,11 @@ public partial class MainForm : Form
         SetAnnotationTool(AnnotationToolMode.Eraser);
     }
 
+    private void MeasurementBoxToolButton_Click(object? sender, EventArgs e)
+    {
+        SetAnnotationTool(AnnotationToolMode.MeasurementBox);
+    }
+
     private void FitToViewButton_Click(object? sender, EventArgs e)
     {
         annotationCanvas.FitToView();
@@ -287,6 +342,11 @@ public partial class MainForm : Form
 
     private void ComponentSettings_ValueChanged(object? sender, EventArgs e)
     {
+        if (isUpdatingComponentSettingsUi)
+        {
+            return;
+        }
+
         ApplyComponentSettingsUi();
         if (imageListBox.SelectedItem is AnnotatedImage)
         {
@@ -439,6 +499,30 @@ public partial class MainForm : Form
         annotatedImages.Clear();
     }
 
+    private void ReplaceAnnotatedImages(
+        IReadOnlyList<AnnotatedImage> images,
+        string? assetDirectory)
+    {
+        annotationCanvas.SetImage(null);
+        imageListBox.Items.Clear();
+        ClearComponents();
+        ClearGeometryStatus();
+        DisposeAnnotatedImages();
+        DisposePackageAssets();
+
+        packageAssetDirectory = assetDirectory;
+        foreach (var image in images)
+        {
+            annotatedImages.Add(image);
+            imageListBox.Items.Add(image);
+        }
+
+        if (imageListBox.Items.Count > 0)
+        {
+            imageListBox.SelectedIndex = 0;
+        }
+    }
+
     private void AnnotationCanvas_MaskChanged(object? sender, EventArgs e)
     {
         if (imageListBox.SelectedItem is AnnotatedImage selectedImage)
@@ -484,6 +568,33 @@ public partial class MainForm : Form
         componentSettings.ComponentMaxAspectRatio = (double)componentMaxAspectNumericUpDown.Value;
     }
 
+    private void SyncComponentSettingsUiFromSettings(DetectionSettings settings)
+    {
+        isUpdatingComponentSettingsUi = true;
+        try
+        {
+            blurKernelNumericUpDown.Value = ClampDecimal(settings.BlurKernelSize, blurKernelNumericUpDown.Minimum, blurKernelNumericUpDown.Maximum);
+            blackHatKernelNumericUpDown.Value = ClampDecimal(settings.BlackHatKernelSize, blackHatKernelNumericUpDown.Minimum, blackHatKernelNumericUpDown.Maximum);
+            componentThresholdNumericUpDown.Value = ClampDecimal((decimal)settings.ComponentThreshold, componentThresholdNumericUpDown.Minimum, componentThresholdNumericUpDown.Maximum);
+            componentOpenNumericUpDown.Value = ClampDecimal(settings.ComponentOpenKernelSize, componentOpenNumericUpDown.Minimum, componentOpenNumericUpDown.Maximum);
+            componentCloseNumericUpDown.Value = ClampDecimal(settings.ComponentCloseKernelSize, componentCloseNumericUpDown.Minimum, componentCloseNumericUpDown.Maximum);
+            componentMinAreaNumericUpDown.Value = ClampDecimal((decimal)settings.ComponentMinArea, componentMinAreaNumericUpDown.Minimum, componentMinAreaNumericUpDown.Maximum);
+            componentMaxAreaNumericUpDown.Value = ClampDecimal((decimal)settings.ComponentMaxArea, componentMaxAreaNumericUpDown.Minimum, componentMaxAreaNumericUpDown.Maximum);
+            componentMinWidthNumericUpDown.Value = ClampDecimal(settings.ComponentMinWidth, componentMinWidthNumericUpDown.Minimum, componentMinWidthNumericUpDown.Maximum);
+            componentMaxWidthNumericUpDown.Value = ClampDecimal(settings.ComponentMaxWidth, componentMaxWidthNumericUpDown.Minimum, componentMaxWidthNumericUpDown.Maximum);
+            componentMinHeightNumericUpDown.Value = ClampDecimal(settings.ComponentMinHeight, componentMinHeightNumericUpDown.Minimum, componentMinHeightNumericUpDown.Maximum);
+            componentMaxHeightNumericUpDown.Value = ClampDecimal(settings.ComponentMaxHeight, componentMaxHeightNumericUpDown.Minimum, componentMaxHeightNumericUpDown.Maximum);
+            componentMinAspectNumericUpDown.Value = ClampDecimal((decimal)settings.ComponentMinAspectRatio, componentMinAspectNumericUpDown.Minimum, componentMinAspectNumericUpDown.Maximum);
+            componentMaxAspectNumericUpDown.Value = ClampDecimal((decimal)settings.ComponentMaxAspectRatio, componentMaxAspectNumericUpDown.Minimum, componentMaxAspectNumericUpDown.Maximum);
+        }
+        finally
+        {
+            isUpdatingComponentSettingsUi = false;
+        }
+
+        ApplyComponentSettingsUi();
+    }
+
     private static void ApplyMaskToImage(AnnotatedImage annotatedImage, Mat mask)
     {
         using var maskGraphics = Graphics.FromImage(annotatedImage.Mask);
@@ -525,6 +636,85 @@ public partial class MainForm : Form
         centerYStatusLabel.Text = "CenterY: -";
         angleStatusLabel.Text = "Angle: -";
         areaStatusLabel.Text = "Area: -";
+    }
+
+    private static string GetSampleDisplayName(FeatureSample sample)
+    {
+        if (!string.IsNullOrWhiteSpace(sample.Name))
+        {
+            return sample.Name;
+        }
+
+        if (!string.IsNullOrWhiteSpace(sample.Id))
+        {
+            return sample.Id;
+        }
+
+        return Path.GetFileName(sample.ImagePath);
+    }
+
+    private static void CopyDetectionSettings(
+        DetectionSettings source,
+        DetectionSettings target)
+    {
+        target.ScoreThreshold = source.ScoreThreshold;
+        target.AngleMin = source.AngleMin;
+        target.AngleMax = source.AngleMax;
+        target.AngleStep = source.AngleStep;
+        target.ScaleMin = source.ScaleMin;
+        target.ScaleMax = source.ScaleMax;
+        target.ScaleStep = source.ScaleStep;
+        target.BlurKernelSize = source.BlurKernelSize;
+        target.BlackHatKernelSize = source.BlackHatKernelSize;
+        target.MaskRefinementDilateSize = source.MaskRefinementDilateSize;
+        target.NmsOverlapThreshold = source.NmsOverlapThreshold;
+        target.MaximumDetections = source.MaximumDetections;
+        target.ComponentThreshold = source.ComponentThreshold;
+        target.ComponentOpenKernelSize = source.ComponentOpenKernelSize;
+        target.ComponentCloseKernelSize = source.ComponentCloseKernelSize;
+        target.ComponentMinArea = source.ComponentMinArea;
+        target.ComponentMaxArea = source.ComponentMaxArea;
+        target.ComponentMinWidth = source.ComponentMinWidth;
+        target.ComponentMaxWidth = source.ComponentMaxWidth;
+        target.ComponentMinHeight = source.ComponentMinHeight;
+        target.ComponentMaxHeight = source.ComponentMaxHeight;
+        target.ComponentMinAspectRatio = source.ComponentMinAspectRatio;
+        target.ComponentMaxAspectRatio = source.ComponentMaxAspectRatio;
+        target.ComponentShapeScoreWeight = source.ComponentShapeScoreWeight;
+        target.ComponentShapeProfileSamples = source.ComponentShapeProfileSamples;
+        target.ComponentShapeDistanceSensitivity = source.ComponentShapeDistanceSensitivity;
+        target.ComponentShapeNormalizeRotation = source.ComponentShapeNormalizeRotation;
+        target.ComponentShapeAllowFlip = source.ComponentShapeAllowFlip;
+        target.RegionOfInterest = source.RegionOfInterest;
+    }
+
+    private static decimal ClampDecimal(
+        decimal value,
+        decimal minimum,
+        decimal maximum)
+    {
+        return Math.Min(maximum, Math.Max(minimum, value));
+    }
+
+    private static string CreatePackageAssetDirectory()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "FeatureVision.AnnotationTool",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        return directory;
+    }
+
+    private void DisposePackageAssets()
+    {
+        if (string.IsNullOrWhiteSpace(packageAssetDirectory))
+        {
+            return;
+        }
+
+        TryDeleteDirectory(packageAssetDirectory);
+        packageAssetDirectory = null;
     }
 
     private static void TryDeleteDirectory(string directory)

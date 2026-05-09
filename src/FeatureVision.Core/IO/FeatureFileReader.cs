@@ -24,6 +24,40 @@ public sealed class FeatureFileReader
         return ReadCoreAsync(packagePath, cancellationToken);
     }
 
+    public async Task<FeatureFileManifest> ReadAndExtractAssetsAsync(
+        string packagePath,
+        string destinationDirectory,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packagePath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationDirectory);
+
+        var manifest = await ReadCoreAsync(packagePath, cancellationToken)
+            .ConfigureAwait(false);
+
+        Directory.CreateDirectory(destinationDirectory);
+
+        using var archive = OpenPackage(packagePath);
+        foreach (var sample in manifest.FeatureModel.Samples)
+        {
+            sample.ImagePath = await ExtractEntryAsync(
+                    archive,
+                    sample.ImagePath,
+                    destinationDirectory,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            sample.MaskPath = await ExtractEntryAsync(
+                    archive,
+                    sample.MaskPath,
+                    destinationDirectory,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return manifest;
+    }
+
     private static async Task<FeatureFileManifest> ReadCoreAsync(
         string packagePath,
         CancellationToken cancellationToken)
@@ -151,5 +185,34 @@ public sealed class FeatureFileReader
         }
 
         return normalized;
+    }
+
+    private static async Task<string> ExtractEntryAsync(
+        ZipArchive archive,
+        string entryName,
+        string destinationDirectory,
+        CancellationToken cancellationToken)
+    {
+        var normalizedEntryName = NormalizeEntryName(entryName);
+        var entry = archive.GetEntry(normalizedEntryName)
+            ?? throw new FileNotFoundException(
+                "The feature package is missing a referenced file.",
+                normalizedEntryName);
+
+        var destinationPath = Path.Combine(
+            destinationDirectory,
+            normalizedEntryName.Replace('/', Path.DirectorySeparatorChar));
+        var destinationPathDirectory = Path.GetDirectoryName(destinationPath);
+        if (!string.IsNullOrWhiteSpace(destinationPathDirectory))
+        {
+            Directory.CreateDirectory(destinationPathDirectory);
+        }
+
+        await using var entryStream = entry.Open();
+        await using var destinationStream = File.Create(destinationPath);
+        await entryStream.CopyToAsync(destinationStream, cancellationToken)
+            .ConfigureAwait(false);
+
+        return destinationPath;
     }
 }

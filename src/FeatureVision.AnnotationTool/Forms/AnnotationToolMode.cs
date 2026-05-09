@@ -5,5 +5,6 @@ public enum AnnotationToolMode
     RectangleRoi,
     Polygon,
     Brush,
-    Eraser
+    Eraser,
+    MeasurementBox
 }

@@ -5,6 +5,7 @@ partial class MainForm
     private System.ComponentModel.IContainer components = null;
     private ToolStrip mainToolStrip;
     private ToolStripButton openImagesButton;
+    private ToolStripButton loadPackageButton;
     private ToolStripButton savePackageButton;
     private ToolStrip componentToolStrip;
     private ToolStripButton findComponentsButton;
@@ -48,6 +49,7 @@ partial class MainForm
     private ToolStripButton rectangleToolButton;
     private ToolStripButton brushToolButton;
     private ToolStripButton eraserToolButton;
+    private ToolStripButton measurementBoxToolButton;
     private ToolStripSeparator toolSeparator;
     private ToolStripLabel brushSizeLabel;
     private ToolStripControlHost brushSizeHost;
@@ -69,6 +71,7 @@ partial class MainForm
         if (disposing)
         {
             DisposeAnnotatedImages();
+            DisposePackageAssets();
             components?.Dispose();
         }
 
@@ -80,6 +83,7 @@ partial class MainForm
         components = new System.ComponentModel.Container();
         mainToolStrip = new ToolStrip();
         openImagesButton = new ToolStripButton();
+        loadPackageButton = new ToolStripButton();
         savePackageButton = new ToolStripButton();
         componentToolStrip = new ToolStrip();
         findComponentsButton = new ToolStripButton();
@@ -123,6 +127,7 @@ partial class MainForm
         rectangleToolButton = new ToolStripButton();
         brushToolButton = new ToolStripButton();
         eraserToolButton = new ToolStripButton();
+        measurementBoxToolButton = new ToolStripButton();
         toolSeparator = new ToolStripSeparator();
         brushSizeLabel = new ToolStripLabel();
         brushSizeHost = new ToolStripControlHost(new NumericUpDown());
@@ -171,11 +176,13 @@ partial class MainForm
         mainToolStrip.GripStyle = ToolStripGripStyle.Hidden;
         mainToolStrip.Items.AddRange(new ToolStripItem[] {
             openImagesButton,
+            loadPackageButton,
             savePackageButton,
             fileToolSeparator,
             rectangleToolButton,
             brushToolButton,
             eraserToolButton,
+            measurementBoxToolButton,
             toolSeparator,
             brushSizeLabel,
             brushSizeHost,
@@ -190,6 +197,12 @@ partial class MainForm
         openImagesButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
         openImagesButton.Text = "Open Images";
         openImagesButton.Click += OpenImagesButton_Click;
+        // 
+        // loadPackageButton
+        // 
+        loadPackageButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
+        loadPackageButton.Text = "Load Package";
+        loadPackageButton.Click += LoadPackageButton_Click;
         // 
         // savePackageButton
         // 
@@ -380,6 +393,13 @@ partial class MainForm
         eraserToolButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
         eraserToolButton.Text = "Eraser";
         eraserToolButton.Click += EraserToolButton_Click;
+        // 
+        // measurementBoxToolButton
+        // 
+        measurementBoxToolButton.CheckOnClick = true;
+        measurementBoxToolButton.DisplayStyle = ToolStripItemDisplayStyle.Text;
+        measurementBoxToolButton.Text = "Box Tool";
+        measurementBoxToolButton.Click += MeasurementBoxToolButton_Click;
         // 
         // brushSizeLabel
         // 
