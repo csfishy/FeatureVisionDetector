@@ -1,3 +1,5 @@
+using FeatureVision.Core.IO;
+
 namespace FeatureVision.Core.Models;
 
 /// <summary>
@@ -8,12 +10,12 @@ public sealed class FeatureFileManifest
     /// <summary>
     /// Identifies the package type for validation.
     /// </summary>
-    public string FormatName { get; set; } = "FeatureVision.FeaturePackage";
+    public string FormatName { get; set; } = FeaturePackageFormat.FormatName;
 
     /// <summary>
     /// Semantic package format version used for compatibility checks.
     /// </summary>
-    public string FormatVersion { get; set; } = "1.0";
+    public string FormatVersion { get; set; } = FeaturePackageFormat.CurrentVersion;
 
     /// <summary>
     /// UTC timestamp for when the package was created.

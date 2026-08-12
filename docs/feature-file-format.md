@@ -2,47 +2,17 @@
 
 ## Overview
 
-A FeatureVision feature package is a single ZIP-based file containing:
+A FeatureVision package is a ZIP archive with the required `.fvfeature` extension. `.featurepkg` is not a supported alias. The extension, format name, and current format version are defined once in `FeaturePackageFormat` and used by both desktop applications and the shared reader/writer.
+
+Every package contains:
 
 - `feature.json`
-- Sample images
-- Binary mask images
+- one source image per sample
+- one binary mask image per sample
 
-The recommended extension is `.fvfeature`. The file remains a standard ZIP archive so it can be inspected with normal ZIP tools during development and support.
+The archive remains inspectable with ordinary ZIP tools, but applications must treat every package and image as untrusted input.
 
-## Package Layout
-
-Recommended package layout:
-
-```text
-feature.json
-samples/
-  sample-0001/
-    image.png
-    masks/
-      feature-0001.png
-      feature-0002.png
-  sample-0002/
-    image.png
-    masks/
-      feature-0003.png
-```
-
-Rules:
-
-- `feature.json` must exist at the package root.
-- Sample image paths must be relative to the package root.
-- Mask image paths must be relative to the package root.
-- Masks must have the same pixel width and height as their source sample image.
-- Mask images must be binary, where foreground target pixels are non-zero and background pixels are zero.
-- PNG is recommended for both sample images and masks.
-- Original source image paths may be stored as metadata, but runtime loading must not depend on them.
-
-## Versioning
-
-The manifest must include a format version.
-
-Initial version:
+## Version and identifiers
 
 ```json
 {
@@ -51,11 +21,37 @@ Initial version:
 }
 ```
 
-Readers should reject unsupported major versions. Readers may accept newer minor versions if all required fields for the supported version are present.
+The current reader accepts version `1.0`. Other versions are rejected so compatibility changes are explicit.
 
-## feature.json Structure
+## Package layout
 
-Example:
+The writer produces deterministic sample directories from each sample's list position and sanitized ID:
+
+```text
+feature.json
+samples/
+  0001-sample-0001/
+    image.png
+    masks/
+      feature.png
+  0002-sample-0002/
+    image.jpg
+    masks/
+      feature.png
+```
+
+Rules:
+
+- `feature.json` is at the archive root.
+- Sample image and mask references are relative paths under `samples/`.
+- Absolute paths and parent-directory traversal are rejected.
+- Runtime loading must not depend on files outside the archive.
+- A mask must have the same pixel dimensions as its source image before it is used.
+- Writers preserve each source file's extension; PNG is recommended for lossless masks.
+
+## `feature.json` structure
+
+This example matches the current C# model:
 
 ```json
 {
@@ -64,192 +60,129 @@ Example:
   "createdUtc": "2026-05-01T00:00:00Z",
   "createdBy": "FeatureVision.AnnotationTool",
   "featureModel": {
-    "id": "model-0001",
-    "name": "Target Feature",
+    "id": "model-20260501000000",
+    "name": "Annotated Feature",
     "description": "",
     "angleConvention": "degrees-clockwise-from-positive-x",
     "samples": [
       {
         "id": "sample-0001",
-        "imagePath": "samples/sample-0001/image.png",
-        "width": 1280,
-        "height": 720,
-        "features": [
-          {
-            "id": "feature-0001",
-            "name": "Feature 1",
-            "maskPath": "samples/sample-0001/masks/feature-0001.png",
-            "centerX": 415.25,
-            "centerY": 302.75,
-            "rotationAngleDegrees": 87.5,
-            "boundingBox": {
-              "x": 398,
-              "y": 260,
-              "width": 34,
-              "height": 88
-            },
-            "area": 1840
-          }
-        ]
+        "name": "sample",
+        "imagePath": "samples/0001-sample-0001/image.png",
+        "maskPath": "samples/0001-sample-0001/masks/feature.png",
+        "imageSize": {
+          "width": 1280,
+          "height": 720
+        },
+        "center": {
+          "x": 415.25,
+          "y": 302.75
+        },
+        "rotationAngleDegrees": 87.5,
+        "boundingBox": {
+          "x": 398,
+          "y": 260,
+          "width": 34,
+          "height": 88
+        },
+        "areaPixels": 1840
       }
     ]
   },
   "detectionSettings": {
-    "minimumScore": 0.72,
-    "rotationMinDegrees": -30.0,
-    "rotationMaxDegrees": 30.0,
-    "rotationStepDegrees": 2.0,
+    "scoreThreshold": 0.72,
+    "angleMin": -30.0,
+    "angleMax": 30.0,
+    "angleStep": 2.0,
     "scaleMin": 0.9,
     "scaleMax": 1.1,
     "scaleStep": 0.05,
+    "blurKernelSize": 3,
+    "blackHatKernelSize": 11,
     "nmsOverlapThreshold": 0.35,
     "maximumDetections": 100
   }
 }
 ```
 
-## Required Manifest Fields
+Compatibility aliases such as `minimumScore` and `rotationMinDegrees` may be serialized by older callers because the current model exposes both names. New packages should use the primary names shown above.
 
-Top-level required fields:
+## Required model data
+
+Top level:
 
 - `formatName`
 - `formatVersion`
 - `featureModel`
 - `detectionSettings`
 
-`featureModel` required fields:
+Feature model:
 
 - `id`
 - `name`
 - `angleConvention`
 - `samples`
 
-Each sample required fields:
+Each sample:
 
 - `id`
 - `imagePath`
-- `width`
-- `height`
-- `features`
-
-Each feature required fields:
-
-- `id`
 - `maskPath`
-- `centerX`
-- `centerY`
-- `rotationAngleDegrees`
-- `boundingBox`
-- `area`
+- positive `imageSize.width` and `imageSize.height`
+- finite `center.x`, `center.y`, and `rotationAngleDegrees`
+- non-negative, finite `areaPixels`
+- a non-negative `boundingBox`
 
-Each bounding box required fields:
+## Angle and coordinate conventions
 
-- `x`
-- `y`
-- `width`
-- `height`
+The initial convention is `degrees-clockwise-from-positive-x`:
 
-## Detection Settings Fields
-
-Initial `detectionSettings` fields:
-
-- `minimumScore`
-- `rotationMinDegrees`
-- `rotationMaxDegrees`
-- `rotationStepDegrees`
-- `scaleMin`
-- `scaleMax`
-- `scaleStep`
-- `nmsOverlapThreshold`
-- `maximumDetections`
-
-Optional future fields:
-
-- `roi`
-- `preprocessGrayscale`
-- `preprocessBlurKernelSize`
-- `preprocessNormalizeContrast`
-- `templateMatchMethod`
-- `pyramidLevels`
-
-## Angle Convention
-
-The initial package convention is:
-
-```text
-degrees-clockwise-from-positive-x
-```
-
-Meaning:
-
-- Angles are stored in degrees.
-- The image coordinate system is used.
-- Positive X points right.
-- Positive Y points down.
-- Positive angle values rotate clockwise.
+- coordinates use the image coordinate system;
+- the origin is the top-left pixel;
+- positive X points right and positive Y points down;
+- positive angle values rotate clockwise;
+- bounding boxes use integer pixel coordinates; and
+- centers may use floating-point coordinates.
 
 `GeometryAnalyzer`, `RotatedTemplateGenerator`, `TemplateFeatureMatcher`, and `DetectionResult` must use the same convention.
 
-## Coordinate Convention
+## Mask requirements
 
-- Pixel coordinates are measured in source image coordinates.
-- Origin is the top-left pixel.
-- X increases to the right.
-- Y increases downward.
-- Bounding boxes use integer pixel coordinates.
-- Centers may use floating-point coordinates.
+- Mask dimensions equal the corresponding sample image dimensions.
+- Background pixels are `0`.
+- Foreground pixels should be `255`; readers treat any non-zero value as foreground.
+- Lossless PNG is recommended.
 
-## Mask Image Requirements
+## Reader safety limits
 
-- Mask width must equal the source sample image width.
-- Mask height must equal the source sample image height.
-- Mask format should be 8-bit single-channel PNG.
-- Background pixels must be `0`.
-- Foreground target pixels should be `255`.
-- Readers should treat any non-zero mask pixel as foreground.
+The current reader applies limits before extraction:
 
-## Package Validation Rules
+- at most 256 samples;
+- at most 513 archive entries;
+- `feature.json` at most 1 MiB;
+- each asset at most 128 MiB uncompressed;
+- the complete archive at most 512 MiB uncompressed;
+- supported relative paths under `samples/` only;
+- extraction paths must remain within the caller-provided destination;
+- package geometry must be finite and non-negative where required; and
+- key detection parameters must stay within safe ranges.
 
-A package is valid only if:
+Image dimensions and decoded image validity are checked when the application loads the extracted assets. These limits reduce archive and resource-exhaustion risk; they are not a substitute for keeping System.Drawing, OpenCvSharp, and the native OpenCV runtime patched.
 
-- The ZIP can be opened.
-- `feature.json` exists and can be parsed.
-- `formatName` is recognized.
-- `formatVersion` is supported.
-- Every sample image path exists in the package.
-- Every mask image path exists in the package.
-- Each mask has the same dimensions as its sample image.
-- Required numeric fields are finite values.
-- Width, height, and area values are greater than zero for non-empty features.
-- Detection settings are within safe ranges.
+## Writer behavior
 
-## Reader Behavior
+The writer:
 
-`FeatureFileReader` should:
+- requires a `.fvfeature` destination;
+- validates the sample count;
+- writes `feature.json` at the root;
+- assigns deterministic archive paths based on sample order and ID;
+- writes referenced images and masks into the archive; and
+- never writes absolute local paths into the package manifest.
 
-- Open the package.
-- Parse `feature.json`.
-- Validate required entries.
-- Load or expose sample image data.
-- Load or expose mask image data.
-- Return a `FeatureModel` and `DetectionSettings`.
-- Provide useful validation errors without crashing the caller.
+## Compatibility policy
 
-## Writer Behavior
-
-`FeatureFileWriter` should:
-
-- Validate the model before writing.
-- Write `feature.json` at the package root.
-- Write all sample images.
-- Write all mask images.
-- Prefer deterministic entry names when possible.
-- Avoid absolute paths inside the package.
-- Avoid depending on files outside the package after save.
-
-## Compatibility Notes
-
-- Runtime apps should not require annotation-only metadata to perform detection.
-- New optional fields may be added in minor versions.
-- Renaming or removing required fields should require a major version change.
-- Unknown fields should be ignored by readers unless they conflict with required fields.
+- New optional fields may be added in a future minor version.
+- Removing or changing required fields requires a new major format version.
+- Readers reject unsupported versions rather than silently guessing.
+- Unknown JSON fields may be ignored when they do not conflict with required data.

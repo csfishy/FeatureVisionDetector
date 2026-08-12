@@ -4,7 +4,7 @@
 
 Development should proceed in documentation-first, core-first phases. The annotation tool and runtime app both depend on `FeatureVision.Core`, so the shared package models, geometry analysis, and feature matching contracts should be established before large UI work begins.
 
-The first milestone is documentation only:
+The first milestone was documentation only and established:
 
 - `docs/requirements.md`
 - `docs/feature-file-format.md`
@@ -12,7 +12,7 @@ The first milestone is documentation only:
 - `docs/test-checklist.md`
 - `AGENTS.md`
 
-No production code should be added in this milestone.
+That milestone is complete; the repository is now preparing an alpha prerelease.
 
 ## Guiding Principles
 
@@ -133,7 +133,7 @@ Implement the shared logic that converts annotations into masks and measurements
 
 - Implement `MaskBuilder`.
 - Support filled rectangle regions.
-- Support filled polygon regions.
+- Reserve filled polygon regions for a later milestone; the current shared `MaskBuilder` methods remain unimplemented.
 - Support brush strokes.
 - Support eraser strokes.
 - Implement `GeometryAnalyzer`.
@@ -148,7 +148,8 @@ Implement the shared logic that converts annotations into masks and measurements
 
 ### Exit Criteria
 
-- Rectangle, polygon, brush, and eraser operations produce expected masks.
+- Rectangle, brush, and eraser operations produce expected masks.
+- Polygon operations receive their own exit criterion when implementation begins.
 - Known masks produce expected center and rotation values within tolerance.
 
 ## Phase 4: Annotation Tool MVP
@@ -164,7 +165,7 @@ Build the first usable annotation workflow.
 - Switch between loaded images.
 - Add annotation tool selection.
 - Implement rectangle ROI marking.
-- Implement polygon marking.
+- Keep polygon marking explicitly out of the current MVP; implement and test it in a later milestone.
 - Implement brush and eraser marking.
 - Show current mask overlay.
 - Create and manage feature entries.

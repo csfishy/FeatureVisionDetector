@@ -55,7 +55,9 @@ Use this checklist to validate the annotation tool, feature package format, shar
 - [ ] Rectangle selection can be cancelled or corrected.
 - [ ] Rectangle-generated mask is binary.
 
-## Annotation Tool: Polygon Selection
+## Annotation Tool: Polygon Selection (Roadmap — Not Implemented)
+
+Do not count this section toward current alpha acceptance. Enable these checks only after the annotation UI exposes a working polygon tool.
 
 - [ ] Polygon tool can add multiple vertices.
 - [ ] Polygon can be completed intentionally.
@@ -85,7 +87,7 @@ Use this checklist to validate the annotation tool, feature package format, shar
 ## Core: MaskBuilder
 
 - [ ] Rectangle input produces expected filled binary mask.
-- [ ] Polygon input produces expected filled binary mask.
+- [ ] Polygon input produces expected filled binary mask. *(Roadmap: `MaskBuilder.BuildFromPolygon` is currently unimplemented.)*
 - [ ] Brush strokes add pixels at expected coordinates.
 - [ ] Eraser strokes remove pixels at expected coordinates.
 - [ ] Mask dimensions match source image dimensions.
@@ -207,7 +209,8 @@ For every failed test, record:
 ## Minimum Acceptance Summary
 
 - Annotation tool opens multiple images.
-- Rectangle, polygon, brush, and eraser tools can create binary masks.
+- Rectangle, brush, and eraser tools can create binary masks.
+- Polygon annotation is explicitly deferred from current alpha acceptance.
 - Feature center and rotation angle are computed from masks.
 - Feature package save and load works.
 - Runtime app loads the package.

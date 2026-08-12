@@ -227,7 +227,7 @@ public partial class MainForm : Form
         using var dialog = new OpenFileDialog
         {
             Title = "Load Feature Package",
-            Filter = "Feature Package|*.featurepkg;*.fvfeature|All Files|*.*"
+            Filter = "FeatureVision Package|*.fvfeature|All Files|*.*"
         };
 
         if (dialog.ShowDialog(this) != DialogResult.OK)
@@ -256,8 +256,8 @@ public partial class MainForm : Form
         using var dialog = new SaveFileDialog
         {
             Title = "Save Feature Package",
-            Filter = "Feature Package|*.featurepkg|All Files|*.*",
-            DefaultExt = "featurepkg",
+            Filter = "FeatureVision Package|*.fvfeature|All Files|*.*",
+            DefaultExt = "fvfeature",
             AddExtension = true
         };
 

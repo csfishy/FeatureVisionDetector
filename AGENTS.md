@@ -8,7 +8,8 @@ The solution has two applications and one shared library:
 
 - `FeatureVision.AnnotationTool`
   - Opens multiple sample images.
-  - Lets users mark target features with rectangle ROI, polygon selection, brush, and eraser tools.
+  - Lets users mark target features with rectangle ROI, brush, and eraser tools.
+  - Polygon selection is planned but is not implemented in the current annotation UI.
   - Generates one binary mask per marked feature.
   - Computes feature center and rotation angle from each mask.
   - Saves a feature package containing `feature.json`, sample images, and mask images.
@@ -79,7 +80,7 @@ The annotation tool must:
 1. Open multiple images.
 2. Let users switch between loaded images.
 3. Support rectangle ROI selection.
-4. Support polygon selection.
+4. Treat polygon selection as a roadmap requirement; do not describe it as implemented until the annotation UI supports it end to end.
 5. Support brush marking.
 6. Support eraser correction.
 7. Generate binary masks aligned to the source image dimensions.
@@ -125,7 +126,8 @@ Maintain `docs/test-checklist.md`.
 Manual tests must cover:
 
 - Opening multiple images.
-- Rectangle, polygon, brush, and eraser annotation tools.
+- Rectangle, brush, and eraser annotation tools.
+- Polygon annotation remains a separate pending manual-test section until implemented.
 - Binary mask generation.
 - Feature center and rotation angle computation.
 - Package save and load.
@@ -139,4 +141,4 @@ Manual tests must cover:
 
 ## Current Milestone
 
-The requested first milestone is documentation only. Do not implement application code until the documentation baseline is complete.
+The documentation baseline is complete and the repository is preparing its first alpha prerelease. Keep documentation aligned with implemented behavior, add regression tests for package and geometry changes, and do not present roadmap items as shipped features.

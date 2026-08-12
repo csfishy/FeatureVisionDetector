@@ -13,7 +13,8 @@ The annotation app lets users mark target features on one or more sample images,
 ## Primary Goals
 
 - Let users open multiple sample images for annotation.
-- Let users highlight target features using rectangle ROI, polygon selection, brush, and eraser tools.
+- Let users highlight target features using rectangle ROI, brush, and eraser tools.
+- Add polygon selection in a future milestone; it is not implemented in the current annotation UI.
 - Generate one binary mask per marked feature.
 - Compute feature center and rotation angle from each binary mask.
 - Save a feature package containing `feature.json`, sample images, and mask images.
@@ -103,12 +104,13 @@ Required model and service types:
 
 ### Annotation Tools
 
-The tool must support:
+The current tool supports:
 
 - Rectangle ROI selection.
-- Polygon selection.
 - Brush painting.
 - Eraser painting.
+
+Polygon selection is a roadmap requirement and must not be presented as implemented until it is wired through the annotation UI and package workflow.
 
 The annotation result for each feature must become a binary mask where target pixels are foreground and all other pixels are background.
 
@@ -122,7 +124,8 @@ The annotation result for each feature must become a binary mask where target pi
 
 ### Mask Generation
 
-- Convert rectangle and polygon selections into filled binary mask regions.
+- Convert rectangle selections into filled binary mask regions.
+- In a future milestone, convert polygon selections into filled binary mask regions.
 - Apply brush strokes to add foreground pixels.
 - Apply eraser strokes to remove foreground pixels.
 - Save mask images using a lossless format.
@@ -238,7 +241,8 @@ The rotation angle should be derived from mask geometry, such as contour princip
 ## Acceptance Criteria
 
 - The annotation tool can open multiple images.
-- The user can mark target features with rectangle, polygon, brush, and eraser tools.
+- The user can mark target features with rectangle, brush, and eraser tools.
+- Polygon marking is deferred and is not part of the current acceptance criteria.
 - The annotation tool can generate one binary mask per marked feature.
 - The annotation tool computes center and rotation angle from each mask.
 - The annotation tool saves a package containing `feature.json`, sample images, and mask images.

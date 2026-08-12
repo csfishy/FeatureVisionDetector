@@ -6,9 +6,6 @@ namespace FeatureVision.Core.IO;
 
 public sealed class FeatureFileWriter
 {
-    private const string FeatureJsonEntryName = "feature.json";
-    private const string SamplesRoot = "samples";
-
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -22,6 +19,7 @@ public sealed class FeatureFileWriter
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packagePath);
         ArgumentNullException.ThrowIfNull(manifest);
+        FeaturePackageFormat.ValidateFileExtension(packagePath);
         ValidateSourceManifest(manifest);
 
         return WriteCoreAsync(packagePath, manifest, cancellationToken);
@@ -37,6 +35,12 @@ public sealed class FeatureFileWriter
         if (manifest.FeatureModel.Samples is null)
         {
             throw new InvalidDataException("The feature manifest is missing its sample list.");
+        }
+
+        if (manifest.FeatureModel.Samples.Count > FeaturePackageFormat.MaximumSampleCount)
+        {
+            throw new InvalidDataException(
+                $"A feature package may contain at most {FeaturePackageFormat.MaximumSampleCount} samples.");
         }
     }
 
@@ -117,7 +121,7 @@ public sealed class FeatureFileWriter
 
             packageSample.MaskPath = BuildPackageEntryName(
                 sampleDirectory,
-                "mask",
+                "masks/feature",
                 sourceSample.MaskPath,
                 ".png");
         }
@@ -128,7 +132,7 @@ public sealed class FeatureFileWriter
         FeatureFileManifest manifest,
         CancellationToken cancellationToken)
     {
-        var manifestEntry = archive.CreateEntry(FeatureJsonEntryName, CompressionLevel.Optimal);
+        var manifestEntry = archive.CreateEntry(FeaturePackageFormat.FeatureJsonEntryName, CompressionLevel.Optimal);
         await using var manifestStream = manifestEntry.Open();
         await JsonSerializer.SerializeAsync(manifestStream, manifest, JsonOptions, cancellationToken)
             .ConfigureAwait(false);
@@ -191,7 +195,7 @@ public sealed class FeatureFileWriter
             ? $"sample-{index + 1:0000}"
             : SanitizePathSegment(sample.Id);
 
-        return $"{SamplesRoot}/{index + 1:0000}-{sampleId}";
+        return $"{FeaturePackageFormat.SamplesRoot}/{index + 1:0000}-{sampleId}";
     }
 
     private static string BuildPackageEntryName(
@@ -229,7 +233,7 @@ public sealed class FeatureFileWriter
             throw new InvalidDataException("The package contains an invalid sample entry path.");
         }
 
-        if (!normalized.StartsWith($"{SamplesRoot}/", StringComparison.OrdinalIgnoreCase))
+        if (!normalized.StartsWith($"{FeaturePackageFormat.SamplesRoot}/", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException("Sample files must be stored under the samples/ package directory.");
         }

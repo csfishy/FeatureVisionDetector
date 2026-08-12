@@ -171,7 +171,7 @@ public partial class MainForm : Form
         using var dialog = new OpenFileDialog
         {
             Title = "Load Feature Package",
-            Filter = "Feature Package|*.featurepkg|All Files|*.*"
+            Filter = "FeatureVision Package|*.fvfeature|All Files|*.*"
         };
 
         if (dialog.ShowDialog(this) != DialogResult.OK)
