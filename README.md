@@ -10,11 +10,11 @@ The project uses deterministic classical computer vision rather than model train
 
 ### Annotation tool
 
-![FeatureVision Annotation Tool](docs/screenshots/annotation-tool.png)
+<img width="1100" height="750" alt="FeatureVision Annotation Tool" src="https://github.com/user-attachments/assets/69e5c76c-5f6d-43b4-8bde-ae2d5c13a88b" />
 
 ### Runtime detector
 
-![FeatureVision Runtime App](docs/screenshots/runtime-app.png)
+<img width="1100" height="750" alt="FeatureVision Runtime App" src="https://github.com/user-attachments/assets/a2edd51d-0b79-4c2b-a367-925f0bdb6854" />
 
 ## What is included
 
