@@ -14,7 +14,7 @@ The project uses deterministic classical computer vision rather than model train
 
 ### Runtime detector
 
-<img width="1100" height="750" alt="FeatureVision Runtime App" src="https://github.com/user-attachments/assets/a2edd51d-0b79-4c2b-a367-925f0bdb6854" />
+<img width="1043" height="984" alt="FeatureVision Runtime App" src="docs/screenshots/runtime-app.png" />
 
 ## What is included
 
